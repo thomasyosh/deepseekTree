@@ -19,3 +19,4 @@ OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/v1/chat/completions
 OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "180"))
 CHAT_TIMEOUT = int(os.getenv("CHAT_TIMEOUT", "60"))
 CHAT_MAX_TOKENS = int(os.getenv("CHAT_MAX_TOKENS", "256"))
+API_BASE_URL = os.getenv("API_BASE_URL", "http://127.0.0.1:8000").rstrip("/")

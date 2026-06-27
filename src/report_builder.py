@@ -2,6 +2,8 @@ import html
 import json
 from typing import Any
 
+import config
+
 
 def _table(title: str, data: dict[str, int]) -> str:
     rows = "".join(
@@ -44,6 +46,7 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
     )
 
     safe_narrative = narrative.strip() or "<p>No narrative generated.</p>"
+    api_base = html.escape(config.API_BASE_URL)
 
     return f"""<!DOCTYPE html>
 <html lang="zh-HK">
@@ -171,15 +174,28 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
     </aside>
   </div>
   <script>
+    const API_BASE = (() => {{
+      const configured = "{api_base}";
+      // Same-origin when served by FastAPI (e.g. :8000)
+      if (window.location.port === "8000") {{
+        return window.location.origin;
+      }}
+      return configured;
+    }})();
+
     const form = document.getElementById("chat-form");
     const input = document.getElementById("chat-input");
     const sendBtn = document.getElementById("chat-send");
     const messages = document.getElementById("chat-messages");
 
-    function addMessage(role, text) {{
+    function addMessage(role, text, isHtml) {{
       const el = document.createElement("div");
       el.className = "msg " + role;
-      el.textContent = text;
+      if (isHtml) {{
+        el.innerHTML = text;
+      }} else {{
+        el.textContent = text;
+      }}
       messages.appendChild(el);
       messages.scrollTop = messages.scrollHeight;
     }}
@@ -189,21 +205,30 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
       const text = input.value.trim();
       if (!text) return;
 
-      addMessage("user", text);
+      addMessage("user", text, false);
       input.value = "";
       sendBtn.disabled = true;
 
       try {{
-        const res = await fetch("/api/chat", {{
+        const res = await fetch(API_BASE + "/api/chat", {{
           method: "POST",
           headers: {{ "Content-Type": "application/json" }},
           body: JSON.stringify({{ message: text }}),
         }});
-        const data = await res.json();
+        const raw = await res.text();
+        let data;
+        try {{
+          data = JSON.parse(raw);
+        }} catch {{
+          throw new Error(
+            "API returned non-JSON (status " + res.status + "). " +
+            "Open via FastAPI at http://127.0.0.1:8000 or set API_BASE_URL in .env"
+          );
+        }}
         if (!res.ok) throw new Error(data.detail || "Request failed");
-        addMessage("assistant", data.reply);
+        addMessage("assistant", data.reply, true);
       }} catch (err) {{
-        addMessage("assistant", "Error: " + err.message);
+        addMessage("assistant", "Error: " + err.message, false);
       }} finally {{
         sendBtn.disabled = false;
         input.focus();

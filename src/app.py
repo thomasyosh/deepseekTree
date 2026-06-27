@@ -12,8 +12,25 @@ import filelogger
 import main as pipeline
 from query_engine import try_answer_locally
 from summary import build_summary
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="Tree Complaint Analyst")
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://127.0.0.1:8000",
+        "http://localhost:8000",
+        "http://127.0.0.1:5500",
+        "http://localhost:5500",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
 
 _chat_history: list[dict[str, str]] = []
 _cached_rows: list[dict[str, Any]] | None = None
