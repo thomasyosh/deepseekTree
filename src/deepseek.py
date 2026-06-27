@@ -6,6 +6,8 @@ import requests
 
 import config
 import filelogger
+from prompts import CHAT_SYSTEM_PROMPT, REPORT_SYSTEM_PROMPT, build_chat_user_prompt
+from query_engine import build_llm_prompt, detect_intent, execute_query
 from report_builder import build_report_html
 from summary import build_summary
 
@@ -13,19 +15,21 @@ from summary import build_summary
 def chat_completion(
     messages: list[dict[str, str]],
     *,
+    model: str | None = None,
     stream: bool = False,
     timeout: int | None = None,
     max_tokens: int = 1500,
 ) -> str:
+    model_name = model or config.AI_MODEL
     payload = {
-        "model": config.AI_MODEL,
+        "model": model_name,
         "messages": messages,
         "stream": stream,
         "options": {"num_predict": max_tokens},
     }
 
     request_timeout = timeout or config.OLLAMA_TIMEOUT
-    filelogger.logger.info(f"Calling Ollama model={config.AI_MODEL}")
+    filelogger.logger.info(f"Calling Ollama model={model_name}")
     response = requests.post(
         config.OLLAMA_URL, json=payload, timeout=request_timeout
     )
@@ -40,20 +44,11 @@ def chat_completion(
 
 def build_analysis_messages(summary: dict[str, Any]) -> list[dict[str, str]]:
     return [
-        {
-            "role": "system",
-            "content": (
-                "You are a data analyst for Hong Kong tree complaint cases. "
-                "Write clear, concise analysis using HTML tags (<p>, <ul>, <li>, <strong>). "
-                "Do not include <html>, <head>, or <body> wrappers."
-            ),
-        },
+        {"role": "system", "content": REPORT_SYSTEM_PROMPT},
         {
             "role": "user",
             "content": (
-                "Analyze this pre-aggregated dataset summary and produce an HTML report section "
-                "with: executive summary, key trends, district hotspots, severity insights, "
-                "and actionable recommendations.\n\n"
+                "Produce the full analysis report section from this summary:\n\n"
                 f"{json.dumps(summary, ensure_ascii=False, indent=2)}"
             ),
         },
@@ -64,25 +59,22 @@ def build_chat_messages(
     summary: dict[str, Any],
     history: list[dict[str, str]],
     user_message: str,
-    sample_rows: list[dict[str, Any]] | None = None,
+    rows: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, str]]:
-    context = {
-        "summary": summary,
-        "sample_rows": sample_rows or [],
-    }
+    if rows:
+        llm_prompt = build_llm_prompt(user_message, rows, summary)
+        user_content = llm_prompt[0] if llm_prompt else user_message
+    else:
+        intent = detect_intent(user_message).value
+        user_content = build_chat_user_prompt(
+            user_message, intent, {"summary": summary}
+        )
+
     messages: list[dict[str, str]] = [
-        {
-            "role": "system",
-            "content": (
-                "You are a helpful data analyst assistant for tree complaint cases in Hong Kong. "
-                "Answer using the provided summary statistics and sample rows. "
-                "Be concise and cite numbers from the summary when possible.\n\n"
-                f"{json.dumps(context, ensure_ascii=False, indent=2)}"
-            ),
-        },
+        {"role": "system", "content": CHAT_SYSTEM_PROMPT},
     ]
-    messages.extend(history[-10:])
-    messages.append({"role": "user", "content": user_message})
+    messages.extend(history[-4:])
+    messages.append({"role": "user", "content": user_content})
     return messages
 
 
@@ -109,8 +101,9 @@ def analyze(data_path: Path | None = None, report_path: Path | None = None) -> P
     try:
         narrative = chat_completion(
             build_analysis_messages(summary),
+            model=config.REPORT_MODEL,
             max_tokens=1200,
-            timeout=180,
+            timeout=config.OLLAMA_TIMEOUT,
         )
     except requests.exceptions.RequestException as e:
         filelogger.logger.error(f"Ollama analysis failed: {e}")

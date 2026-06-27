@@ -1,6 +1,7 @@
 import json
 from typing import Any
 
+import requests
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
@@ -9,7 +10,8 @@ import config
 import deepseek
 import filelogger
 import main as pipeline
-from summary import build_summary, filter_rows
+from query_engine import try_answer_locally
+from summary import build_summary
 
 app = FastAPI(title="Tree Complaint Analyst")
 
@@ -74,14 +76,50 @@ def chat(request: ChatRequest) -> dict[str, str]:
 
     try:
         rows, summary = _load_dataset()
-        sample_rows = filter_rows(rows, message, limit=8)
+
+        local_reply = try_answer_locally(message, rows, summary)
+        if local_reply:
+            _chat_history.append({"role": "user", "content": message})
+            _chat_history.append({"role": "assistant", "content": local_reply})
+            return {"reply": local_reply, "source": "local"}
+
         messages = deepseek.build_chat_messages(
-            summary, _chat_history, message, sample_rows
+            summary, _chat_history, message, rows=rows
         )
-        reply = deepseek.chat_completion(messages, max_tokens=512)
+        try:
+            reply = deepseek.chat_completion(
+                messages,
+                model=config.CHAT_MODEL,
+                max_tokens=config.CHAT_MAX_TOKENS,
+                timeout=config.CHAT_TIMEOUT,
+            )
+            source = "ai"
+        except requests.exceptions.Timeout:
+            filelogger.logger.error(
+                f"Chat timed out after {config.CHAT_TIMEOUT}s "
+                f"(model={config.CHAT_MODEL})"
+            )
+            reply = (
+                "<p><strong>AI timed out.</strong> Try a faster model:</p>"
+                "<pre>ollama pull deepseek-r1:8b</pre>"
+                "<p>Then set <code>CHAT_MODEL=deepseek-r1:8b</code> in .env "
+                "and restart the server.</p>"
+                "<p>For ranking questions (e.g. top 5 serious areas), "
+                "answers are returned instantly without AI.</p>"
+            )
+            source = "timeout"
+        except requests.exceptions.RequestException as e:
+            filelogger.logger.error(f"Chat request failed: {e}")
+            reply = (
+                f"<p><strong>Could not reach Ollama.</strong> "
+                f"Ensure it is running on port 11434.</p>"
+                f"<p><em>{e}</em></p>"
+            )
+            source = "error"
+
         _chat_history.append({"role": "user", "content": message})
         _chat_history.append({"role": "assistant", "content": reply})
-        return {"reply": reply}
+        return {"reply": reply, "source": source}
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except Exception as e:
