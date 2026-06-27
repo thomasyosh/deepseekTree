@@ -1,44 +1,73 @@
+import json
+from pathlib import Path
+
 import requests
-import os
-import os
-from dotenv import load_dotenv
-import filelogger
+
+import config
 import deepseek
+import filelogger
 
-def main():
-    """
-        Save a json response file from database endpoint
-    """
 
-    endpoint = os.getenv("ENDPOINT")
-    apiKey = os.getenv("API_KEY")
-    proxyPath = os.getenv("PROXY")
-    header = {
-        "apikey": apiKey
-    }
+def _parse_proxy(proxy_value: str | None) -> dict[str, str] | None:
+    if not proxy_value:
+        return None
+    return {"http": proxy_value, "https": proxy_value}
+
+
+def fetch_data(data_path: Path | None = None) -> bool:
+    """Fetch JSON from the configured endpoint and save to data.json."""
+    data_path = data_path or config.DATA_PATH
+
+    if not config.ENDPOINT:
+        filelogger.logger.error("ENDPOINT is not set in .env")
+        return False
+
+    headers = {}
+    if config.API_KEY:
+        headers["apikey"] = config.API_KEY
+
+    proxies = _parse_proxy(config.PROXY)
 
     try:
-        if proxyPath == None:
-            filelogger.logger.info(f"Sending GET request to {endpoint}")
-            response = requests.get(endpoint, headers=header)
-            if response.status_code == 200:
-                with open("data.json", "w", encoding="utf-8") as file:
-                        file.write(response.text)
+        filelogger.logger.info(f"Sending GET request to {config.ENDPOINT}")
+        response = requests.get(
+            config.ENDPOINT,
+            headers=headers,
+            proxies=proxies,
+            timeout=60,
+        )
+        response.raise_for_status()
 
-        else:
-            filelogger.logger.info(f"Sending GET request to {endpoint}")
-            response = requests.get(endpoint, headers=header, proxies=proxyPath)
-            if response.status_code == 200:
-                with open("data.json", "w", encoding="utf-8") as file:
-                    file.write(response.text)
-    
-    except requests.exceptions.HTTPError as e:
-        filelogger.logger.error(e)
-        return None
+        data_path.parent.mkdir(parents=True, exist_ok=True)
+        data_path.write_text(response.text, encoding="utf-8")
+        filelogger.logger.info(f"Saved response to {data_path}")
+        return True
+
+    except requests.exceptions.RequestException as e:
+        filelogger.logger.error(f"Request failed: {e}")
+        return False
     except Exception as e:
-        filelogger.logger.error(e)
-        return None
+        filelogger.logger.error(f"Unexpected error: {e}")
+        return False
+
+
+def run_pipeline() -> bool:
+    if not fetch_data():
+        return False
+
+    try:
+        deepseek.analyze()
+        return True
+    except Exception as e:
+        filelogger.logger.error(f"Analysis failed: {e}")
+        return False
+
+
+def main() -> None:
+    success = run_pipeline()
+    if not success:
+        raise SystemExit(1)
+
 
 if __name__ == "__main__":
     main()
-    deepseek()

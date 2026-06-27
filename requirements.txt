@@ -1,4 +1,5 @@
 requests
-dotenv
-openai
-pypdf
+python-dotenv
+fastapi
+uvicorn
+pydantic
