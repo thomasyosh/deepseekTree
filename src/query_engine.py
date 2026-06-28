@@ -1,10 +1,14 @@
 import html
 import re
 from collections import Counter
+from datetime import date
 from enum import Enum
 from typing import Any
 
 from prompts import build_chat_user_prompt
+from summary import build_summary
+
+DATE_PATTERN = re.compile(r"(\d{4}-\d{2}-\d{2})")
 
 
 class Intent(str, Enum):
@@ -67,6 +71,79 @@ def _wants_district(message: str) -> bool:
 def _wants_newest(message: str) -> bool:
     lower = message.lower()
     return any(t in lower or t in message for t in ("newest", "latest", "recent", "最新", "最近"))
+
+
+def _extract_date_range(message: str) -> tuple[str | None, str | None]:
+    """Parse start/end dates from free text. End defaults to today when requested."""
+    lower = message.lower()
+    today = date.today().isoformat()
+
+    wants_today_end = any(
+        t in lower or t in message
+        for t in ("current date", "today", "現在", "目前", "今日", "當前", "今天")
+    )
+
+    range_match = re.search(
+        r"(?:from|between|自|從|由)\s*(\d{4}-\d{2}-\d{2})\s*"
+        r"(?:to|until|and|至|到|-)\s*"
+        r"(\d{4}-\d{2}-\d{2}|current\s*date|today|現在|今日|今天)",
+        message,
+        re.IGNORECASE,
+    )
+    if range_match:
+        start = range_match.group(1)
+        end_raw = range_match.group(2).lower().replace(" ", "")
+        end = today if end_raw in ("currentdate", "today", "現在", "今日", "今天") else range_match.group(2)
+        return start, end
+
+    dates = DATE_PATTERN.findall(message)
+    if len(dates) >= 2:
+        return dates[0], dates[1]
+
+    if len(dates) == 1 and wants_today_end:
+        return dates[0], today
+
+    if len(dates) == 1 and any(
+        t in lower for t in ("from", "since", "after", "starting", "自", "從", "由")
+    ):
+        return dates[0], today
+
+    return None, None
+
+
+def _apply_date_range(
+    rows: list[dict[str, Any]], start: str | None, end: str | None
+) -> list[dict[str, Any]]:
+    filtered = rows
+    if start:
+        filtered = [r for r in filtered if r.get("case_date", "") >= start]
+    if end:
+        filtered = [r for r in filtered if r.get("case_date", "") <= end]
+    return filtered
+
+
+def _apply_message_filters(
+    message: str, rows: list[dict[str, Any]], summary: dict[str, Any]
+) -> tuple[list[dict[str, Any]], dict[str, Any], str]:
+    """Apply date filters from the message and rebuild summary for the filtered rows."""
+    start, end = _extract_date_range(message)
+    if not (start or end):
+        return rows, summary, ""
+
+    filtered = _apply_date_range(rows, start, end)
+    filtered_summary = build_summary(filtered)
+    effective_start = start or filtered_summary.get("date_range", ["—", "—"])[0]
+    effective_end = end or filtered_summary.get("date_range", ["—", "—"])[1]
+    banner = (
+        '<section class="query-result"><p><strong>Date filter applied:</strong> '
+        f"{html.escape(effective_start)} → {html.escape(effective_end)} "
+        f"({filtered_summary.get('total_cases', 0)} cases)</p></section>"
+    )
+    return filtered, filtered_summary, banner
+
+
+def _with_banner(banner: str, html_out: str) -> str:
+    return banner + html_out if banner else html_out
 
 
 def _extract_district(message: str, rows: list[dict[str, Any]]) -> str | None:
@@ -153,6 +230,19 @@ def _sort_cases(
     return sorted(filtered, key=lambda r: r.get("case_date", ""), reverse=reverse)[:limit]
 
 
+def _overview_html(summary: dict[str, Any]) -> str:
+    date_range = summary.get("date_range", ["—", "—"])
+    return (
+        '<section class="query-result"><h3>Dataset Overview</h3><ul>'
+        f"<li><strong>Total cases:</strong> {summary.get('total_cases', 0)}</li>"
+        f"<li><strong>Total trees:</strong> {summary.get('total_trees', 0)}</li>"
+        f"<li><strong>Date range:</strong> {date_range[0]} → {date_range[1]}</li>"
+        f"<li><strong>Serious (嚴重):</strong> "
+        f"{summary.get('by_severity', {}).get('嚴重', 0)}</li>"
+        "</ul></section>"
+    )
+
+
 def _rank_districts(rows: list[dict[str, Any]], message: str, limit: int) -> list[tuple[str, int]]:
     if _wants_severe(message):
         counts = Counter(r["district"] for r in rows if r.get("severity") == "嚴重")
@@ -170,6 +260,14 @@ def execute_query(
     Run a structured query. Returns (html_or_none, intent, data_for_llm_fallback).
     If html is not None, use it directly. Otherwise pass intent+data to LLM with standardized prompt.
     """
+    rows, summary, banner = _apply_message_filters(message, rows, summary)
+
+    if not rows and banner:
+        empty = (
+            '<section class="query-result"><p>No cases found in the selected date range.</p></section>'
+        )
+        return _with_banner(banner, empty), Intent.FILTER, []
+
     intent = detect_intent(message, rows)
     limit = _extract_limit(message)
 
@@ -183,7 +281,7 @@ def execute_query(
             title = f"Cases in {district}"
         summary_block = _district_summary_html(district, cases, all_in_district)
         table_block = _cases_table_html(title, cases)
-        return summary_block + table_block, Intent.FILTER, cases
+        return _with_banner(banner, summary_block + table_block), Intent.FILTER, cases
 
     if intent == Intent.OVERVIEW:
         data = {
@@ -193,48 +291,55 @@ def execute_query(
             "by_severity": summary.get("by_severity", {}),
             "by_status": summary.get("by_status", {}),
         }
-        html_out = (
-            '<section class="query-result"><h3>Dataset Overview</h3><ul>'
-            f"<li><strong>Total cases:</strong> {data['total_cases']}</li>"
-            f"<li><strong>Total trees:</strong> {data['total_trees']}</li>"
-            f"<li><strong>Date range:</strong> {data['date_range'][0]} → {data['date_range'][1]}</li>"
-            f"<li><strong>Serious (嚴重):</strong> {data['by_severity'].get('嚴重', 0)}</li>"
-            "</ul></section>"
-        )
-        return html_out, intent, data
+        return _with_banner(banner, _overview_html(summary)), intent, data
 
     if intent == Intent.SORT_CASES:
         cases = _sort_cases(rows, message, limit)
         order = "newest" if _wants_newest(message) else "oldest"
         title = f"{limit} {order} cases" + (" (嚴重 only)" if _wants_severe(message) else "")
-        return _cases_table_html(title, cases), intent, cases
+        return _with_banner(banner, _cases_table_html(title, cases)), intent, cases
 
     if intent == Intent.RANK:
         if any(t in message for t in ("complaint", "投訴", "類型", "类型")):
             ranked = Counter(summary.get("by_complaint_type", {})).most_common(limit)
             title = f"Top {limit} complaint types"
-            return _ranking_html(title, ranked), intent, ranked
+            return _with_banner(banner, _ranking_html(title, ranked)), intent, ranked
         if any(t in message for t in ("status", "狀態", "状态")):
             ranked = Counter(summary.get("by_status", {})).most_common(limit)
             title = f"Top {limit} statuses"
-            return _ranking_html(title, ranked), intent, ranked
+            return _with_banner(banner, _ranking_html(title, ranked)), intent, ranked
         if any(t in message for t in ("contractor", "承辦商", "承办商")):
             ranked = Counter(summary.get("by_contractor", {})).most_common(limit)
             title = f"Top {limit} contractors"
-            return _ranking_html(title, ranked), intent, ranked
+            return _with_banner(banner, _ranking_html(title, ranked)), intent, ranked
         if any(t in message for t in ("species", "樹種", "树种")):
             ranked = Counter(summary.get("by_tree_species", {})).most_common(limit)
             title = f"Top {limit} tree species"
-            return _ranking_html(title, ranked), intent, ranked
+            return _with_banner(banner, _ranking_html(title, ranked)), intent, ranked
         if _wants_district(message) or _wants_severe(message) or "top" in message.lower() or "前" in message:
             ranked = _rank_districts(rows, message, limit)
             label = "serious cases (嚴重)" if _wants_severe(message) else "total cases"
             title = f"Top {limit} districts by {label}"
-            return _ranking_html(title, ranked), intent, ranked
+            return _with_banner(banner, _ranking_html(title, ranked)), intent, ranked
 
     if intent == Intent.FILTER and _wants_severe(message):
         cases = _sort_cases(rows, message, limit)
-        return _cases_table_html(f"Top {limit} serious cases (嚴重)", cases), intent, cases
+        return (
+            _with_banner(banner, _cases_table_html(f"Top {limit} serious cases (嚴重)", cases)),
+            intent,
+            cases,
+        )
+
+    start, end = _extract_date_range(message)
+    if start or end:
+        data = {
+            "total_cases": summary.get("total_cases", 0),
+            "total_trees": summary.get("total_trees", 0),
+            "date_range": summary.get("date_range"),
+            "by_severity": summary.get("by_severity", {}),
+            "by_status": summary.get("by_status", {}),
+        }
+        return _with_banner(banner, _overview_html(summary)), Intent.OVERVIEW, data
 
     return None, intent, None
 
@@ -256,5 +361,9 @@ def build_llm_prompt(
     """For unknown intents: pre-compute partial data and return standardized user prompt."""
     _, intent, data = execute_query(message, rows, summary)
     if data is None:
-        data = {"summary": summary, "hint": "Answer from summary statistics only"}
+        _, filtered_summary, _ = _apply_message_filters(message, rows, summary)
+        data = {
+            "summary": filtered_summary,
+            "hint": "Answer from summary statistics only",
+        }
     return build_chat_user_prompt(message, intent.value, data), data

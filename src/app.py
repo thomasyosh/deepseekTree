@@ -118,8 +118,8 @@ def chat(request: ChatRequest) -> dict[str, str]:
             )
             reply = (
                 "<p><strong>AI timed out.</strong> Try a faster model:</p>"
-                "<pre>ollama pull deepseek-r1:8b</pre>"
-                "<p>Then set <code>CHAT_MODEL=deepseek-r1:8b</code> in .env "
+                "<pre>ollama pull deepseek-r1:7b</pre>"
+                "<p>Then set <code>CHAT_MODEL=deepseek-r1:7b</code> in .env "
                 "and restart the server.</p>"
                 "<p>For ranking questions (e.g. top 5 serious areas), "
                 "answers are returned instantly without AI.</p>"
