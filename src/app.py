@@ -20,6 +20,7 @@ from summary import build_summary
 from fastapi.middleware.cors import CORSMiddleware
 from chat_normalize import is_export_request
 from prompts import build_export_ready_html
+from report_builder import build_report_html, read_stored_narrative
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -161,8 +162,19 @@ def _invalidate_cache() -> None:
 
 @app.get("/", response_class=HTMLResponse)
 def index() -> HTMLResponse:
-    if config.REPORT_PATH.exists():
-        return HTMLResponse(config.REPORT_PATH.read_text(encoding="utf-8"))
+    """Always build the page from the latest UI template (avoids stale report.html)."""
+    headers = {"Cache-Control": "no-store"}
+    try:
+        _, summary = _load_dataset()
+        narrative = read_stored_narrative(config.REPORT_PATH)
+        html = build_report_html(summary, narrative)
+        return HTMLResponse(html, headers=headers)
+    except (FileNotFoundError, ValueError):
+        if config.REPORT_PATH.exists():
+            return HTMLResponse(
+                config.REPORT_PATH.read_text(encoding="utf-8"),
+                headers=headers,
+            )
     return HTMLResponse(
         "<h1>No report yet</h1>"
         "<p>Data is loading or report generation is still in progress.</p>"
