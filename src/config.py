@@ -7,13 +7,19 @@ from dotenv import load_dotenv
 ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT / ".env")
 
-_LOCALHOST_NO_PROXY = ("localhost", "127.0.0.1", "[::1]")
+_LOCALHOST_NO_PROXY = (
+    "localhost",
+    "127.0.0.1",
+    "[::1]",
+    "<local>",
+    "*.local",
+)
 
 
 def _ensure_localhost_bypasses_proxy() -> None:
     """Keep local Ollama calls off the corporate proxy."""
     existing = os.getenv("NO_PROXY") or os.getenv("no_proxy") or ""
-    hosts = {h.strip() for h in existing.split(",") if h.strip()}
+    hosts = {h.strip() for h in existing.replace(";", ",").split(",") if h.strip()}
     if set(_LOCALHOST_NO_PROXY).issubset(hosts):
         return
     merged = ",".join(sorted(hosts | set(_LOCALHOST_NO_PROXY)))

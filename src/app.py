@@ -19,6 +19,25 @@ from fastapi.middleware.cors import CORSMiddleware
 async def lifespan(app: FastAPI):
     filelogger.logger.info("Startup: ensuring dataset is available")
     pipeline.ensure_dataset(generate_report=True)
+
+    health = deepseek.check_ollama_health()
+    if health["ok"]:
+        filelogger.logger.info(
+            f"Ollama OK at {health['host']}:{health['port']} "
+            f"(models: {', '.join(health['models_available']) or 'none'})"
+        )
+        for hint in health["hints"]:
+            filelogger.logger.warning(f"Ollama: {hint}")
+    else:
+        filelogger.logger.error(
+            f"Ollama NOT reachable at {health['host']}:{health['port']}: {health['error']}"
+        )
+        for hint in health["hints"]:
+            filelogger.logger.error(f"  → {hint}")
+        filelogger.logger.error(
+            "  → Diagnostics: http://127.0.0.1:8000/api/ollama-health"
+        )
+
     yield
 
 
@@ -87,6 +106,12 @@ def index() -> HTMLResponse:
         "Try <code>POST /api/refresh</code> or check server logs.</p>",
         status_code=404,
     )
+
+
+@app.get("/api/ollama-health")
+def ollama_health() -> dict[str, Any]:
+    """Diagnostics for colleagues — open in browser or API tester."""
+    return deepseek.check_ollama_health()
 
 
 @app.get("/api/summary")
@@ -166,19 +191,11 @@ def chat(request: ChatRequest) -> dict[str, str]:
                     f"<p><em>{e}</em></p>"
                 )
             else:
-                reply = (
-                    f"<p><strong>Could not reach Ollama.</strong> "
-                    f"Ensure it is running on port 11434.</p>"
-                    f"<p><em>{e}</em></p>"
-                )
+                reply = deepseek.ollama_troubleshooting_html(e)
             source = "error"
         except requests.exceptions.RequestException as e:
             filelogger.logger.error(f"Chat request failed: {e}")
-            reply = (
-                f"<p><strong>Could not reach Ollama.</strong> "
-                f"Ensure it is running on port 11434.</p>"
-                f"<p><em>{e}</em></p>"
-            )
+            reply = deepseek.ollama_troubleshooting_html(e)
             source = "error"
 
         _chat_history.append({"role": "user", "content": message})

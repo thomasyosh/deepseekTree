@@ -1,5 +1,6 @@
 import http.client
 import json
+import os
 import socket
 from pathlib import Path
 from typing import Any
@@ -47,6 +48,171 @@ def _ollama_post_json(payload: dict[str, Any], timeout: int) -> dict[str, Any]:
         raise requests.exceptions.ConnectionError(str(e)) from e
     finally:
         conn.close()
+
+
+def _is_proxy_policy_page(body: str) -> bool:
+    lower = body.lower().strip()
+    return lower.startswith("<!doctype") or lower.startswith("<html") or (
+        "<body" in lower and "policy" in lower
+    )
+
+
+def _proxy_bypass_hints() -> list[str]:
+    return [
+        "Your company proxy intercepts http://localhost — curl may show a policy HTML "
+        "page even when Ollama is fine. That is NOT a valid Ollama test.",
+        "Test Ollama without the proxy: "
+        "curl.exe --noproxy \"*\" http://127.0.0.1:11434/api/tags",
+        "Always use 127.0.0.1 (not localhost) in .env: "
+        "OLLAMA_URL=http://127.0.0.1:11434/v1/chat/completions",
+        "Windows proxy bypass: Settings → Network → Proxy → "
+        "\"Bypass proxy server for these addresses\" add: "
+        "localhost;127.0.0.1;<local>",
+        "Or before starting the server: "
+        'set NO_PROXY=localhost,127.0.0.1,<local>',
+        "This app's Ollama calls use a direct TCP socket to 127.0.0.1 (not the proxy). "
+        "Open http://127.0.0.1:8000/api/ollama-health for the real status.",
+    ]
+
+
+def check_ollama_health(timeout: int = 5) -> dict[str, Any]:
+    """Probe Ollama /api/tags and return diagnostics for colleagues."""
+    health: dict[str, Any] = {
+        "ok": False,
+        "url": config.OLLAMA_URL,
+        "host": config.OLLAMA_HOST,
+        "port": config.OLLAMA_PORT,
+        "model_configured": config.CHAT_MODEL,
+        "models_available": [],
+        "error": None,
+        "hints": [],
+        "proxy_env": {
+            "HTTP_PROXY": os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy"),
+            "HTTPS_PROXY": os.environ.get("HTTPS_PROXY")
+            or os.environ.get("https_proxy"),
+            "NO_PROXY": os.environ.get("NO_PROXY") or os.environ.get("no_proxy"),
+        },
+    }
+
+    if config.OLLAMA_HOST == "ollama":
+        health["hints"].append(
+            "OLLAMA_URL uses hostname 'ollama' — that only works inside Docker. "
+            "For native Python set OLLAMA_URL=http://127.0.0.1:11434/v1/chat/completions "
+            "in .env and restart the server."
+        )
+
+    conn = http.client.HTTPConnection(
+        config.OLLAMA_HOST, config.OLLAMA_PORT, timeout=timeout
+    )
+    try:
+        conn.request("GET", "/api/tags")
+        resp = conn.getresponse()
+        body = resp.read().decode("utf-8", errors="replace")
+        if resp.status != 200:
+            health["error"] = f"HTTP {resp.status}: {body[:300]}"
+            if _is_proxy_policy_page(body):
+                health["hints"].extend(_proxy_bypass_hints())
+            else:
+                health["hints"].append(
+                    "Ollama responded but with an error. Check the Ollama app logs."
+                )
+            return health
+
+        if _is_proxy_policy_page(body):
+            health["error"] = "Received company proxy policy HTML instead of Ollama JSON"
+            health["hints"].extend(_proxy_bypass_hints())
+            return health
+
+        data = json.loads(body)
+        models = [m.get("name", "") for m in data.get("models", []) if m.get("name")]
+        health["models_available"] = models
+        health["ok"] = True
+
+        if not _model_is_available(config.CHAT_MODEL, models):
+            health["hints"].append(
+                f"Model '{config.CHAT_MODEL}' is not installed. "
+                f"Run in a terminal: ollama pull {config.CHAT_MODEL}"
+            )
+        return health
+    except ConnectionRefusedError:
+        health["error"] = (
+            f"Connection refused to {config.OLLAMA_HOST}:{config.OLLAMA_PORT}"
+        )
+        health["hints"].extend(_ollama_not_running_hints())
+        return health
+    except OSError as e:
+        health["error"] = str(e)
+        if "10061" in str(e) or "refused" in str(e).lower():
+            health["hints"].extend(_ollama_not_running_hints())
+        else:
+            health["hints"].append(
+                f"Cannot open TCP to {config.OLLAMA_HOST}:{config.OLLAMA_PORT}. "
+                "Check firewall or OLLAMA_URL in .env."
+            )
+        return health
+    except (TimeoutError, socket.timeout) as e:
+        health["error"] = f"Timed out after {timeout}s: {e}"
+        health["hints"].append("Ollama is not responding. Is the Ollama app running?")
+        return health
+    except json.JSONDecodeError as e:
+        health["error"] = f"Invalid JSON from Ollama: {e}"
+        health["hints"].extend(_proxy_bypass_hints())
+        return health
+    finally:
+        conn.close()
+
+
+def _model_is_available(model: str, available: list[str]) -> bool:
+    if not available:
+        return False
+    if model in available:
+        return True
+    prefix = f"{model}:"
+    return any(name == model or name.startswith(prefix) for name in available)
+
+
+def _ollama_not_running_hints() -> list[str]:
+    return [
+        "Install Ollama from https://ollama.com if you have not already.",
+        "Start the Ollama desktop app (or run: ollama serve).",
+        "In .env set: OLLAMA_URL=http://127.0.0.1:11434/v1/chat/completions",
+        "Do NOT test with: curl http://localhost:11434 (proxy may return policy HTML).",
+        "Test without proxy: curl.exe --noproxy \"*\" http://127.0.0.1:11434/api/tags",
+        "Then pull the model: ollama pull deepseek-r1:7b",
+        "Restart uvicorn after changing .env.",
+    ]
+
+
+def ollama_troubleshooting_html(error: Exception | None = None) -> str:
+    health = check_ollama_health(timeout=3)
+    lines = [
+        "<p><strong>Could not reach Ollama.</strong></p>",
+        f"<p>Configured URL: <code>{health['url']}</code></p>",
+    ]
+    if health["error"]:
+        lines.append(f"<p><em>{health['error']}</em></p>")
+    if error and str(error) != health.get("error"):
+        lines.append(f"<p><em>{error}</em></p>")
+    if health["hints"]:
+        lines.append("<p><strong>Checklist:</strong></p><ol>")
+        for hint in health["hints"]:
+            lines.append(f"<li>{hint}</li>")
+        lines.append("</ol>")
+    else:
+        lines.extend(_ollama_not_running_hints_html())
+    lines.append(
+        "<p>Run diagnostics: <a href='/api/ollama-health'>GET /api/ollama-health</a></p>"
+    )
+    return "".join(lines)
+
+
+def _ollama_not_running_hints_html() -> list[str]:
+    return [
+        "<p><strong>Checklist:</strong></p><ol>",
+        *[f"<li>{h}</li>" for h in _ollama_not_running_hints()],
+        "</ol>",
+    ]
+
 
 def chat_completion(
     messages: list[dict[str, str]],
