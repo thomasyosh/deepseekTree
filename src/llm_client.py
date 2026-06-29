@@ -14,6 +14,43 @@ def _request_timeout(read_timeout: int | None) -> tuple[int, int]:
     return (config.CHAT_CONNECT_TIMEOUT, read_timeout or config.CHAT_TIMEOUT)
 
 
+def _ollama_post(url: str, payload: dict[str, Any], read_timeout: int) -> dict[str, Any]:
+    started = time.monotonic()
+    response = requests.post(
+        url,
+        json=payload,
+        proxies=config.NO_PROXY,
+        timeout=_request_timeout(read_timeout),
+    )
+    elapsed = time.monotonic() - started
+    filelogger.logger.info(
+        f"Ollama responded in {elapsed:.1f}s status={response.status_code} url={url}"
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def _extract_chat_content(data: dict[str, Any], *, require_content: bool) -> str:
+    message = data.get("message") or {}
+    content = (message.get("content") or "").strip()
+    if content:
+        return content
+
+    thinking = (message.get("thinking") or "").strip()
+    if data.get("done") and not require_content:
+        return content or thinking or "OK"
+
+    if thinking and data.get("done_reason") == "length":
+        raise RuntimeError(
+            "DeepSeek used all tokens on internal reasoning before producing a reply. "
+            "Increase CHAT_MAX_TOKENS (try 512) or use a smaller prompt."
+        )
+
+    if require_content:
+        raise RuntimeError(f"Unexpected Ollama response (empty content): {data}")
+    return content
+
+
 def chat_completion(
     messages: list[dict[str, str]],
     *,
@@ -21,6 +58,7 @@ def chat_completion(
     stream: bool = False,
     timeout: int | None = None,
     max_tokens: int = 1500,
+    require_content: bool = True,
 ) -> str:
     if stream:
         raise NotImplementedError("Streaming is not enabled in this app")
@@ -42,45 +80,46 @@ def chat_completion(
 
     prompt_chars = sum(len(m.get("content", "")) for m in messages)
     filelogger.logger.info(
-        f"Calling Ollama model={model_name} url={url} "
-        f"prompt_chars={prompt_chars} read_timeout={read_timeout}s think=false"
+        f"Calling Ollama model={model_name} prompt_chars={prompt_chars} "
+        f"max_tokens={max_tokens} read_timeout={read_timeout}s"
     )
 
-    started = time.monotonic()
-    response = requests.post(
-        url,
-        json=payload,
-        proxies=config.NO_PROXY,
-        timeout=_request_timeout(read_timeout),
-    )
-    elapsed = time.monotonic() - started
-    filelogger.logger.info(f"Ollama responded in {elapsed:.1f}s status={response.status_code}")
-
-    response.raise_for_status()
-    data = response.json()
-    message = data.get("message", {})
-    content = message.get("content")
-    if not content:
-        raise RuntimeError(f"Unexpected Ollama response: {data}")
-    return content
+    data = _ollama_post(url, payload, read_timeout)
+    return _extract_chat_content(data, require_content=require_content)
 
 
 def warm_up_model(timeout: int | None = None) -> bool:
-    """Load the model into memory before the first user chat (avoids first-request timeout)."""
+    """Load the model into memory. Never raises — startup must not fail here."""
+    if not config.OLLAMA_WARMUP:
+        filelogger.logger.info("Ollama warm-up skipped (OLLAMA_WARMUP=false)")
+        return True
+
     read_timeout = timeout or config.OLLAMA_TIMEOUT
+    model_name = config.CHAT_MODEL
+    url = f"{config.OLLAMA_BASE_URL}/api/generate"
+
     try:
         filelogger.logger.info(
-            f"Warming up Ollama model={config.CHAT_MODEL} (timeout={read_timeout}s)..."
+            f"Warming up Ollama model={model_name} via /api/generate "
+            f"(timeout={read_timeout}s)..."
         )
-        chat_completion(
-            [{"role": "user", "content": "Reply with exactly: OK"}],
-            max_tokens=8,
-            timeout=read_timeout,
+        data = _ollama_post(
+            url,
+            {
+                "model": model_name,
+                "prompt": "Hello",
+                "stream": False,
+                "keep_alive": config.OLLAMA_KEEP_ALIVE,
+            },
+            read_timeout,
         )
-        filelogger.logger.info("Ollama warm-up complete")
-        return True
-    except requests.exceptions.RequestException as e:
-        filelogger.logger.warning(f"Ollama warm-up failed: {e}")
+        if data.get("done"):
+            filelogger.logger.info("Ollama warm-up complete (model loaded)")
+            return True
+        filelogger.logger.warning(f"Ollama warm-up returned unexpected payload: {data}")
+        return False
+    except Exception as e:
+        filelogger.logger.warning(f"Ollama warm-up failed (server will still start): {e}")
         return False
 
 
@@ -113,17 +152,16 @@ def check_llm_health(timeout: int = 5) -> dict[str, Any]:
             health["hints"].append(
                 f"Model '{config.CHAT_MODEL}' not found. Run: ollama pull {config.CHAT_MODEL}"
             )
-        if config.CHAT_TIMEOUT < 180:
+        if config.CHAT_MAX_TOKENS < 256:
             health["hints"].append(
-                f"CHAT_TIMEOUT={config.CHAT_TIMEOUT}s may be too low for CPU inference; use 300+"
+                "DeepSeek-R1 may need CHAT_MAX_TOKENS=512 (reasoning uses tokens before the reply)"
             )
     except requests.exceptions.RequestException as e:
         health["error"] = str(e)
         health["hints"] = [
             "Install and start Ollama from https://ollama.com",
             f"Set OLLAMA_BASE_URL={config.OLLAMA_BASE_URL} in .env",
-            f"Increase CHAT_TIMEOUT (current: {config.CHAT_TIMEOUT}s) — CPU models need 300s+",
-            "Use deepseek-r1:7b instead of 14b on company laptops",
+            f"Increase CHAT_TIMEOUT (current: {config.CHAT_TIMEOUT}s)",
             "Test: curl.exe --noproxy \"*\" http://localhost:11434/api/tags",
         ]
     return health
@@ -142,9 +180,9 @@ def llm_troubleshooting_html(error: Exception | None = None) -> str:
     from deepseek import ollama_troubleshooting_html
 
     html = ollama_troubleshooting_html(error)
-    return html.replace(
-        "</ol>",
-        f"<li>Increase <code>CHAT_TIMEOUT</code> (current: {config.CHAT_TIMEOUT}s). "
-        "Try <code>300</code> or <code>600</code> for CPU inference.</li></ol>",
-        1,
+    extra = (
+        f"<li>Increase <code>CHAT_MAX_TOKENS</code> (current: {config.CHAT_MAX_TOKENS}) "
+        "— DeepSeek-R1 uses tokens for reasoning first.</li>"
+        f"<li>Increase <code>CHAT_TIMEOUT</code> (current: {config.CHAT_TIMEOUT}s).</li>"
     )
+    return html.replace("</ol>", extra + "</ol>", 1)

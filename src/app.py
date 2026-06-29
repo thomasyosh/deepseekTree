@@ -32,7 +32,8 @@ async def lifespan(app: FastAPI):
         )
         for hint in health.get("hints", []):
             filelogger.logger.warning(f"LLM: {hint}")
-        llm_client.warm_up_model()
+        if config.OLLAMA_WARMUP:
+            llm_client.warm_up_model()
     else:
         filelogger.logger.error(
             f"LLM NOT ready ({config.LLM_PROVIDER}): {health.get('error')}"

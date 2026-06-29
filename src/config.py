@@ -75,7 +75,8 @@ OLLAMA_NUM_CTX = int(os.getenv("OLLAMA_NUM_CTX", "1024"))
 OLLAMA_KEEP_ALIVE = os.getenv("OLLAMA_KEEP_ALIVE", "30m")
 CHAT_CONNECT_TIMEOUT = int(os.getenv("CHAT_CONNECT_TIMEOUT", "15"))
 CHAT_TIMEOUT = int(os.getenv("CHAT_TIMEOUT", "300"))
-CHAT_MAX_TOKENS = int(os.getenv("CHAT_MAX_TOKENS", "128"))
+CHAT_MAX_TOKENS = int(os.getenv("CHAT_MAX_TOKENS", "512"))
+OLLAMA_WARMUP = _env_bool("OLLAMA_WARMUP", default=True)
 API_BASE_URL = os.getenv("API_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
 
 if not VERIFY_SSL:
