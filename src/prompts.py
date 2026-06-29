@@ -15,7 +15,8 @@ OUTPUT RULES (strict):
 4. Start with <h3>Title</h3> describing what the result shows.
 5. Use <table> for row-level case data; use <ol> for ranked lists.
 6. Use only numbers and facts from the provided data — never invent values.
-7. Keep responses concise (under 15 rows unless asked for more)."""
+7. Keep responses concise (under 15 rows unless asked for more).
+8. Respond immediately — no chain-of-thought, no reasoning blocks, no `` tags."""
 
 REPORT_SYSTEM_PROMPT = f"""You are a data analyst for Hong Kong tree complaint cases.
 

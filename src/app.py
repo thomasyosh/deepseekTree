@@ -27,10 +27,12 @@ async def lifespan(app: FastAPI):
     if health["ok"]:
         filelogger.logger.info(
             f"Ollama OK @ {config.OLLAMA_BASE_URL} "
-            f"(models: {', '.join(health.get('models_available', [])) or 'none'})"
+            f"(models: {', '.join(health.get('models_available', [])) or 'none'}, "
+            f"chat_timeout={config.CHAT_TIMEOUT}s)"
         )
         for hint in health.get("hints", []):
             filelogger.logger.warning(f"LLM: {hint}")
+        llm_client.warm_up_model()
     else:
         filelogger.logger.error(
             f"LLM NOT ready ({config.LLM_PROVIDER}): {health.get('error')}"
@@ -165,8 +167,14 @@ def chat(request: ChatRequest) -> dict[str, str]:
                 f"(model={config.CHAT_MODEL})"
             )
             reply = (
-                "<p><strong>AI timed out.</strong> Try a faster model "
-                f"(current: <code>{config.CHAT_MODEL}</code>).</p>"
+                "<p><strong>AI timed out.</strong></p>"
+                f"<p>Waited {config.CHAT_TIMEOUT}s for <code>{config.CHAT_MODEL}</code> "
+                "on CPU — this is common on company laptops.</p>"
+                "<ul>"
+                "<li>Set <code>CHAT_TIMEOUT=600</code> in .env and restart</li>"
+                "<li>Use <code>deepseek-r1:7b</code> instead of 14b</li>"
+                "<li>First request loads the model — check server logs for warm-up</li>"
+                "</ul>"
                 "<p>For ranking questions (e.g. top 5 serious areas), "
                 "answers are returned instantly without AI.</p>"
             )
