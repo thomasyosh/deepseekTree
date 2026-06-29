@@ -190,6 +190,16 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
       display: none;
     }}
     .file-warning a {{ color: #1d4ed8; }}
+    .live-server-info {{
+      background: #dbeafe;
+      color: #1e3a8a;
+      padding: 0.75rem 1rem;
+      margin: 0 1rem 0.5rem;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      display: none;
+    }}
+    .live-server-info a {{ color: #1d4ed8; }}
     .conn-ok {{ color: #15803d; }}
     .conn-bad {{ color: #b91c1c; }}
     @media (max-width: 900px) {{
@@ -212,6 +222,7 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
     <aside class="sidebar">
       <div class="chat-header">Chat with AI Analyst</div>
       <div id="file-warning" class="file-warning"></div>
+      <div id="live-server-info" class="live-server-info"></div>
       <div id="chat-status" class="chat-status"></div>
       <div id="chat-messages" class="chat-messages"></div>
       <form id="chat-form" class="chat-input">
@@ -228,21 +239,39 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
       10
     );
     const clientTimeoutMs = (chatTimeoutSec + 120) * 1000;
-
-    const clientTimeoutMs = (chatTimeoutSec + 120) * 1000;
     const isFilePage = window.location.protocol === "file:";
+    const apiBase = configuredApiBase.replace(/\\/$/, "");
 
-    /** Same-origin relative path when served over HTTP — avoids CORS / wrong host. */
-    function chatEndpoint() {{
+    function isFastApiOrigin() {{
+      if (isFilePage) return false;
+      const host = window.location.hostname;
+      const local = host === "127.0.0.1" || host === "localhost" || host === "[::1]";
+      return local && window.location.port === "8000";
+    }}
+
+    function isCrossOriginPreview() {{
+      return !isFilePage && !isFastApiOrigin();
+    }}
+
+    /** FastAPI on :8000 → same-origin /api/... ; Live Server etc. → full URL to uvicorn. */
+    function apiUrl(path) {{
       if (isFilePage) return null;
-      if (window.location.protocol === "http:" || window.location.protocol === "https:") {{
-        return "/api/chat";
-      }}
-      return configuredApiBase.replace(/\\/$/, "") + "/api/chat";
+      if (isFastApiOrigin()) return path;
+      return apiBase + path;
+    }}
+
+    function chatEndpoint() {{
+      return apiUrl("/api/chat");
     }}
 
     const statusEl = document.getElementById("chat-status");
     const fileWarning = document.getElementById("file-warning");
+    const liveServerInfo = document.getElementById("live-server-info");
+
+    function setStatus(text, busy) {{
+      statusEl.textContent = text || "";
+      statusEl.classList.toggle("busy", !!busy);
+    }}
 
     if (isFilePage) {{
       fileWarning.style.display = "block";
@@ -250,39 +279,45 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
         "<strong>Chat disabled:</strong> this page was opened as a local file " +
         "(<code>file://</code>). Browsers block that from calling the API. " +
         "Open " +
-        '<a href="' + configuredApiBase + '/" target="_blank" rel="noopener">' +
-        configuredApiBase + "/</a> instead (keep the server running).";
+        '<a href="' + apiBase + '/" target="_blank" rel="noopener">' +
+        apiBase + "/</a> instead (keep the server running).";
+    }} else if (isCrossOriginPreview()) {{
+      liveServerInfo.style.display = "block";
+      liveServerInfo.innerHTML =
+        "Preview server detected (<code>" + window.location.origin + "</code>). " +
+        "Chat will call <strong>" + apiBase + "</strong> — keep uvicorn running there. " +
+        'Simplest option: <a href="' + apiBase + '/">' + apiBase + "/</a>";
     }}
 
     async function checkApiConnection() {{
       if (isFilePage) {{
-        setStatus("Not connected — open via " + configuredApiBase + "/", false);
+        setStatus("Not connected — open via " + apiBase + "/", false);
         return false;
       }}
+      const healthUrl = apiUrl("/api/health");
       try {{
-        const res = await fetch("/api/health", {{ method: "GET", credentials: "same-origin" }});
+        const res = await fetch(healthUrl, {{
+          method: "GET",
+          credentials: isFastApiOrigin() ? "same-origin" : "omit",
+          mode: "cors",
+        }});
         if (!res.ok) throw new Error("HTTP " + res.status);
-        setStatus("Connected to API at " + window.location.origin, false);
+        setStatus("Connected to API at " + apiBase, false);
         statusEl.classList.add("conn-ok");
         return true;
       }} catch (err) {{
         setStatus(
-          "Cannot reach API at " + window.location.origin +
-          " — start the server, then reload this page.",
+          "Cannot reach API at " + apiBase +
+          " — start uvicorn (port 8000), then reload this page.",
           false
         );
         statusEl.classList.add("conn-bad");
-        console.error("API health check failed:", err);
+        console.error("API health check failed:", healthUrl, err);
         return false;
       }}
     }}
 
     checkApiConnection();
-
-    function setStatus(text, busy) {{
-      statusEl.textContent = text || "";
-      statusEl.classList.toggle("busy", !!busy);
-    }}
 
     let thinkingEl = null;
 
@@ -316,7 +351,13 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
         if (isFilePage) {{
           return (
             "Failed to fetch — you opened report.html as a file. " +
-            "Use " + configuredApiBase + "/ in the browser (not double-click report.html)."
+            "Use " + apiBase + "/ in the browser (not double-click report.html)."
+          );
+        }}
+        if (isCrossOriginPreview()) {{
+          return (
+            "Failed to fetch — could not reach " + apiBase + " from Live Server. " +
+            "Ensure uvicorn is running on port 8000, or open " + apiBase + "/ directly."
           );
         }}
         return (
@@ -443,7 +484,8 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
           method: "POST",
           headers: {{ "Content-Type": "application/json" }},
           body: JSON.stringify({{ message: text }}),
-          credentials: "same-origin",
+          credentials: isFastApiOrigin() ? "same-origin" : "omit",
+          mode: "cors",
           signal: controller.signal,
         }});
         const raw = await res.text();
