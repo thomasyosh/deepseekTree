@@ -9,6 +9,8 @@ services:
       - ollama_data:/root/.ollama
     ports:
       - "11434:11434"
+    # llama.cpp needs more than Docker's default 64MB /dev/shm or the process is SIGKILL'd.
+    shm_size: "2gb"
     environment:
       # Registry pulls may need the company proxy; use host.docker.internal on Windows Docker.
       HTTP_PROXY: ${PROXY:-}
@@ -17,6 +19,9 @@ services:
       https_proxy: ${PROXY:-}
       NO_PROXY: localhost,127.0.0.1,ollama,api
       no_proxy: localhost,127.0.0.1,ollama,api
+      OLLAMA_NUM_PARALLEL: "1"
+      OLLAMA_MAX_LOADED_MODELS: "1"
+      OLLAMA_KEEP_ALIVE: "10m"
     healthcheck:
       test: ["CMD", "ollama", "list"]
       interval: 10s

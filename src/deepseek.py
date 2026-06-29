@@ -61,7 +61,10 @@ def chat_completion(
         "model": model_name,
         "messages": messages,
         "stream": stream,
-        "options": {"num_predict": max_tokens},
+        "options": {
+            "num_predict": max_tokens,
+            "num_ctx": config.OLLAMA_NUM_CTX,
+        },
     }
 
     request_timeout = timeout or config.OLLAMA_TIMEOUT

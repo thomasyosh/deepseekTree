@@ -59,6 +59,7 @@ OLLAMA_HOST = (_ollama_parts.hostname or "127.0.0.1").replace("localhost", "127.
 OLLAMA_PORT = _ollama_parts.port or 11434
 OLLAMA_PATH = _ollama_parts.path or "/v1/chat/completions"
 OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "180"))
+OLLAMA_NUM_CTX = int(os.getenv("OLLAMA_NUM_CTX", "2048"))
 CHAT_TIMEOUT = int(os.getenv("CHAT_TIMEOUT", "60"))
 CHAT_MAX_TOKENS = int(os.getenv("CHAT_MAX_TOKENS", "256"))
 API_BASE_URL = os.getenv("API_BASE_URL", "http://127.0.0.1:8000").rstrip("/")

@@ -153,6 +153,18 @@ def chat(request: ChatRequest) -> dict[str, str]:
                     "<pre>curl.exe http://127.0.0.1:11434/api/tags</pre>"
                     f"<p><em>{e}</em></p>"
                 )
+            elif status == 500 and "killed" in str(e).lower():
+                reply = (
+                    "<p><strong>Ollama ran out of memory.</strong></p>"
+                    "<p><code>llama-server … signal: killed</code> usually means "
+                    "the model process was stopped by the OS (OOM).</p>"
+                    "<ul>"
+                    "<li>Docker Desktop → Settings → Resources → Memory: use at least 8 GB</li>"
+                    "<li>Use <code>deepseek-r1:7b</code> (not 14b) unless you have 16+ GB RAM</li>"
+                    "<li>Lower <code>OLLAMA_NUM_CTX=2048</code> in .env</li>"
+                    "</ul>"
+                    f"<p><em>{e}</em></p>"
+                )
             else:
                 reply = (
                     f"<p><strong>Could not reach Ollama.</strong> "
