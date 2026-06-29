@@ -6,6 +6,14 @@ services:
       - ollama_data:/root/.ollama
     ports:
       - "11434:11434"
+    environment: &no_proxy_env
+      HTTP_PROXY: ""
+      HTTPS_PROXY: ""
+      http_proxy: ""
+      https_proxy: ""
+      ALL_PROXY: ""
+      NO_PROXY: "*"
+      no_proxy: "*"
     healthcheck:
       test: ["CMD", "ollama", "list"]
       interval: 10s
@@ -29,6 +37,7 @@ services:
       ollama:
         condition: service_healthy
     environment:
+      <<: *no_proxy_env
       OLLAMA_HOST: ollama:11434
     entrypoint: ["/bin/sh", "-c"]
     command:
@@ -36,13 +45,22 @@ services:
     restart: "no"
 
   api:
-    build: .
+    build:
+      context: .
+      args:
+        HTTP_PROXY: ""
+        HTTPS_PROXY: ""
+        http_proxy: ""
+        https_proxy: ""
+        ALL_PROXY: ""
+        NO_PROXY: "*"
     container_name: deepseektree-api
     ports:
       - "8000:8000"
     env_file:
       - .env
     environment:
+      <<: *no_proxy_env
       OLLAMA_URL: http://ollama:11434/v1/chat/completions
       AI_MODEL: deepseek-r1:7b
       CHAT_MODEL: deepseek-r1:7b
