@@ -19,7 +19,7 @@ def main() -> int:
     print("=== deepseekTree setup check ===\n")
 
     print(f"ENDPOINT set: {bool(config.ENDPOINT)}")
-    print(f"OLLAMA_URL:   {config.OLLAMA_URL}")
+    print(f"OLLAMA_BASE_URL: {config.OLLAMA_BASE_URL}")
     print(f"LLM_PROVIDER: {config.LLM_PROVIDER}")
     print(f"CHAT_MODEL:   {config.CHAT_MODEL}")
     print(f"HTTP_PROXY:   {os.environ.get('HTTP_PROXY') or os.environ.get('http_proxy') or '(not set)'}")

@@ -25,11 +25,10 @@ async def lifespan(app: FastAPI):
 
     health = llm_client.check_llm_health()
     if health["ok"]:
-        if config.LLM_PROVIDER == "ollama":
-            filelogger.logger.info(
-                f"Local DeepSeek OK via OpenAI API @ {config.OLLAMA_OPENAI_BASE_URL} "
-                f"(models: {', '.join(health.get('models_available', [])) or 'none'})"
-            )
+        filelogger.logger.info(
+            f"Ollama OK @ {config.OLLAMA_BASE_URL} "
+            f"(models: {', '.join(health.get('models_available', [])) or 'none'})"
+        )
         for hint in health.get("hints", []):
             filelogger.logger.warning(f"LLM: {hint}")
     else:
@@ -38,14 +37,9 @@ async def lifespan(app: FastAPI):
         )
         for hint in health.get("hints", []):
             filelogger.logger.error(f"  → {hint}")
-        if config.LLM_PROVIDER == "cloud":
-            filelogger.logger.error(
-                "  → Or set LLM_PROVIDER=ollama for local DeepSeek via Ollama"
-            )
-        else:
-            filelogger.logger.error(
-                "  → Ensure Ollama is running and deepseek-r1:7b is pulled"
-            )
+        filelogger.logger.error(
+            "  → Ensure Ollama is running: ollama pull deepseek-r1:14b"
+        )
         filelogger.logger.error("  → Diagnostics: http://127.0.0.1:8000/api/llm-health")
 
     yield

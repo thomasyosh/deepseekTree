@@ -3,5 +3,4 @@ python-dotenv
 fastapi
 uvicorn
 pydantic
-openai
-httpx
+ollama
