@@ -74,38 +74,88 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
       --muted: #5c6370;
       --accent: #2563eb;
       --border: #e5e7eb;
+      --sidebar-width: 380px;
+      --chat-pane-height: 42vh;
     }}
     * {{ box-sizing: border-box; }}
+    html, body {{ height: 100%; }}
     body {{
       margin: 0;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       background: var(--bg);
       color: var(--text);
+      overflow: hidden;
     }}
     .layout {{
-      display: grid;
-      grid-template-columns: 1fr 380px;
-      min-height: 100vh;
+      display: flex;
+      flex-direction: row;
+      height: 100vh;
+      height: 100dvh;
+      width: 100%;
+      overflow: hidden;
     }}
-    .main {{ padding: 2rem; overflow-y: auto; }}
+    .main {{
+      flex: 1 1 auto;
+      min-width: 240px;
+      padding: 1.25rem 1.5rem 2rem;
+      overflow-y: auto;
+      overflow-x: hidden;
+      -webkit-overflow-scrolling: touch;
+    }}
+    .pane-resizer {{
+      flex: 0 0 7px;
+      cursor: col-resize;
+      background: linear-gradient(90deg, transparent, var(--border) 35%, var(--border) 65%, transparent);
+      touch-action: none;
+      position: relative;
+      z-index: 2;
+    }}
+    .pane-resizer::after {{
+      content: "";
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 3px;
+      height: 2.5rem;
+      border-radius: 3px;
+      background: #cbd5e1;
+    }}
+    .pane-resizer:hover,
+    .pane-resizer:focus-visible {{
+      background: #dbeafe;
+      outline: none;
+    }}
+    .layout.is-resizing {{
+      cursor: col-resize;
+      user-select: none;
+    }}
+    .layout.is-resizing .main,
+    .layout.is-resizing .sidebar {{
+      pointer-events: none;
+    }}
     .sidebar {{
+      flex: 0 0 var(--sidebar-width);
+      width: var(--sidebar-width);
+      min-width: 260px;
+      max-width: min(75vw, 900px);
       background: var(--card);
       border-left: 1px solid var(--border);
       display: flex;
       flex-direction: column;
-      height: 100vh;
-      position: sticky;
-      top: 0;
+      min-height: 0;
+      overflow: hidden;
     }}
-    h1 {{ margin-top: 0; }}
+    h1 {{ margin-top: 0; font-size: clamp(1.35rem, 2.5vw, 1.75rem); }}
     .card {{
       background: var(--card);
       border: 1px solid var(--border);
       border-radius: 12px;
       padding: 1.25rem;
       margin-bottom: 1rem;
+      overflow-x: auto;
     }}
-    table {{ width: 100%; border-collapse: collapse; }}
+    table {{ width: 100%; border-collapse: collapse; min-width: 260px; }}
     th, td {{
       text-align: left;
       padding: 0.5rem 0.75rem;
@@ -113,17 +163,55 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
     }}
     .narrative {{ line-height: 1.6; }}
     .chat-header {{
-      padding: 1rem 1.25rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      padding: 0.75rem 1rem;
       border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }}
+    .chat-title {{
       font-weight: 600;
+      font-size: 0.95rem;
+      line-height: 1.3;
+    }}
+    .chat-toolbar {{
+      display: flex;
+      gap: 0.35rem;
+      flex-shrink: 0;
+    }}
+    .chat-toolbar button,
+    .chat-actions button {{
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #fff;
+      color: var(--text);
+      font-size: 0.8rem;
+      font-weight: 600;
+      cursor: pointer;
+      padding: 0.4rem 0.65rem;
+      white-space: nowrap;
+    }}
+    .chat-toolbar button:hover,
+    .chat-actions button:hover {{ background: #f9fafb; }}
+    .chat-toolbar button:disabled,
+    .chat-actions button:disabled {{ opacity: 0.5; cursor: not-allowed; }}
+    .chat-toolbar button.primary {{
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
     }}
     .chat-messages {{
-      flex: 1;
+      flex: 1 1 auto;
+      min-height: 0;
       overflow-y: auto;
+      overflow-x: hidden;
       padding: 1rem 1.25rem;
       display: flex;
       flex-direction: column;
       gap: 0.75rem;
+      -webkit-overflow-scrolling: touch;
     }}
     .msg {{
       padding: 0.75rem 1rem;
@@ -143,8 +231,9 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
     .chat-input {{
       display: flex;
       gap: 0.5rem;
-      padding: 1rem;
+      padding: 0.75rem 1rem;
       border-top: 1px solid var(--border);
+      flex-shrink: 0;
     }}
     .chat-input input {{
       flex: 1;
@@ -164,22 +253,20 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
     }}
     .chat-input button:disabled {{ opacity: 0.6; cursor: not-allowed; }}
     .chat-actions {{
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
       padding: 0 1rem 1rem;
-      border-top: 1px solid var(--border);
+      flex-shrink: 0;
     }}
     .chat-actions button {{
       width: 100%;
       padding: 0.65rem 1rem;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      background: #fff;
-      color: var(--text);
       font-size: 0.9rem;
-      font-weight: 600;
-      cursor: pointer;
     }}
-    .chat-actions button:hover {{ background: #f9fafb; }}
-    .chat-actions button:disabled {{ opacity: 0.5; cursor: not-allowed; }}
+    .chat-actions button.download-btn {{
+      background: #fff;
+    }}
     .chat-input button.loading::after {{
       content: "…";
       animation: dots 1.2s steps(4, end) infinite;
@@ -245,13 +332,66 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
       transition: opacity 0.2s;
     }}
     @media (max-width: 900px) {{
-      .layout {{ grid-template-columns: 1fr; }}
-      .sidebar {{ height: 50vh; position: static; }}
+      body {{ overflow: auto; }}
+      .layout {{
+        flex-direction: column;
+        height: auto;
+        min-height: 100vh;
+        min-height: 100dvh;
+      }}
+      .main {{
+        flex: none;
+        width: 100%;
+        min-height: 50vh;
+        max-height: none;
+        padding: 1rem;
+      }}
+      .pane-resizer {{
+        flex: 0 0 10px;
+        width: 100%;
+        cursor: row-resize;
+        border-top: 1px solid var(--border);
+        border-bottom: 1px solid var(--border);
+      }}
+      .pane-resizer::after {{
+        width: 2.5rem;
+        height: 3px;
+      }}
+      .layout.is-resizing {{
+        cursor: row-resize;
+      }}
+      .sidebar {{
+        flex: 0 0 var(--chat-pane-height);
+        width: 100%;
+        max-width: none;
+        min-width: 0;
+        min-height: 220px;
+        max-height: 85vh;
+        border-left: none;
+      }}
+      .chat-input input {{ font-size: 16px; }}
+      .msg {{ max-width: 100%; }}
+    }}
+    @media (max-width: 480px) {{
+      .chat-header {{
+        flex-wrap: wrap;
+      }}
+      .chat-toolbar {{
+        width: 100%;
+        justify-content: flex-end;
+      }}
+      .chat-input {{
+        flex-wrap: wrap;
+      }}
+      .chat-input button {{
+        width: 100%;
+        padding: 0.75rem;
+      }}
     }}
   </style>
 </head>
 <body>
-  <div class="layout">
+  <div class="layout" id="app-layout">
     <main class="main" id="report-main">
       <h1>Tree Complaint Analysis Report</h1>
       <p id="report-data-updated" class="data-updated" aria-live="polite"></p>
@@ -262,8 +402,22 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
         {safe_narrative}
       </section>
     </main>
-    <aside class="sidebar">
-      <div class="chat-header">Chat with AI Analyst</div>
+    <div
+      class="pane-resizer"
+      id="pane-resizer"
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Drag to resize report and chat panels"
+      tabindex="0"
+    ></div>
+    <aside class="sidebar" id="chat-sidebar">
+      <div class="chat-header">
+        <span class="chat-title">Chat with AI Analyst</span>
+        <div class="chat-toolbar">
+          <button type="button" id="chat-new-session" title="Start a new chat session">New</button>
+          <button type="button" id="chat-clear" title="Clear messages in this session">Clear</button>
+        </div>
+      </div>
       <div id="file-warning" class="file-warning"></div>
       <div id="live-server-info" class="live-server-info"></div>
       <div id="chat-status" class="chat-status"></div>
@@ -273,7 +427,7 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
         <button type="submit" id="chat-send">Send</button>
       </form>
       <div class="chat-actions">
-        <button type="button" id="chat-download" title="Download this chat as HTML">
+        <button type="button" class="download-btn" id="chat-download" title="Download this chat as HTML">
           Download chat report
         </button>
       </div>
@@ -581,12 +735,50 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
     const input = document.getElementById("chat-input");
     const sendBtn = document.getElementById("chat-send");
     const downloadBtn = document.getElementById("chat-download");
+    const clearBtn = document.getElementById("chat-clear");
+    const newSessionBtn = document.getElementById("chat-new-session");
     const messages = document.getElementById("chat-messages");
-    const CHAT_STORAGE_KEY = "deepseektree_chat_history";
+    const appLayout = document.getElementById("app-layout");
+    const paneResizer = document.getElementById("pane-resizer");
+    const chatSidebar = document.getElementById("chat-sidebar");
+
+    const SESSION_STORAGE_KEY = "deepseektree_session_id";
+    const SIDEBAR_WIDTH_KEY = "deepseektree_sidebar_width";
+    const CHAT_HEIGHT_KEY = "deepseektree_chat_height";
+    const LEGACY_CHAT_KEY = "deepseektree_chat_history";
+
+    function getSessionId() {{
+      let id = sessionStorage.getItem(SESSION_STORAGE_KEY);
+      if (!id) {{
+        id = String(Date.now());
+        sessionStorage.setItem(SESSION_STORAGE_KEY, id);
+      }}
+      return id;
+    }}
+
+    function chatStorageKey() {{
+      return "deepseektree_chat_" + getSessionId();
+    }}
+
+    function migrateLegacyChat() {{
+      try {{
+        const legacy = sessionStorage.getItem(LEGACY_CHAT_KEY);
+        if (!legacy) return;
+        const key = chatStorageKey();
+        if (!sessionStorage.getItem(key)) {{
+          sessionStorage.setItem(key, legacy);
+        }}
+        sessionStorage.removeItem(LEGACY_CHAT_KEY);
+      }} catch (err) {{
+        console.warn("Could not migrate legacy chat storage", err);
+      }}
+    }}
+
+    migrateLegacyChat();
 
     function loadStoredMessages() {{
       try {{
-        const raw = sessionStorage.getItem(CHAT_STORAGE_KEY);
+        const raw = sessionStorage.getItem(chatStorageKey());
         return raw ? JSON.parse(raw) : [];
       }} catch {{
         return [];
@@ -595,13 +787,238 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
 
     function saveStoredMessages(items) {{
       try {{
-        sessionStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(items));
+        sessionStorage.setItem(chatStorageKey(), JSON.stringify(items));
       }} catch (err) {{
         console.warn("Could not save chat history", err);
       }}
     }}
 
+    function isStackedLayout() {{
+      return window.matchMedia("(max-width: 900px)").matches;
+    }}
+
+    function clampSidebarWidth(px) {{
+      const min = 260;
+      const max = Math.min(Math.floor(window.innerWidth * 0.75), window.innerWidth - 280);
+      return Math.max(min, Math.min(px, Math.max(min, max)));
+    }}
+
+    function clampChatHeight(px) {{
+      const min = 220;
+      const max = Math.min(Math.floor(window.innerHeight * 0.85), window.innerHeight - 200);
+      return Math.max(min, Math.min(px, Math.max(min, max)));
+    }}
+
+    function applySidebarWidth(px, persist) {{
+      const w = clampSidebarWidth(px);
+      document.documentElement.style.setProperty("--sidebar-width", w + "px");
+      if (persist) localStorage.setItem(SIDEBAR_WIDTH_KEY, String(w));
+      return w;
+    }}
+
+    function applyChatHeight(px, persist) {{
+      const h = clampChatHeight(px);
+      document.documentElement.style.setProperty("--chat-pane-height", h + "px");
+      if (persist) localStorage.setItem(CHAT_HEIGHT_KEY, String(h));
+      return h;
+    }}
+
+    function loadPaneSizes() {{
+      const savedWidth = parseInt(localStorage.getItem(SIDEBAR_WIDTH_KEY) || "", 10);
+      if (!Number.isNaN(savedWidth)) applySidebarWidth(savedWidth, false);
+      const savedHeight = parseInt(localStorage.getItem(CHAT_HEIGHT_KEY) || "", 10);
+      if (!Number.isNaN(savedHeight)) applyChatHeight(savedHeight, false);
+    }}
+
+    loadPaneSizes();
+
+    let resizeMode = null;
+    let resizeStart = 0;
+    let resizeStartSize = 0;
+
+    function onResizeMove(clientX, clientY) {{
+      if (!resizeMode) return;
+      if (resizeMode === "sidebar") {{
+        const delta = resizeStart - clientX;
+        applySidebarWidth(resizeStartSize + delta, true);
+      }} else if (resizeMode === "chat-height") {{
+        const delta = clientY - resizeStart;
+        applyChatHeight(resizeStartSize + delta, true);
+      }}
+    }}
+
+    function stopResize() {{
+      resizeMode = null;
+      appLayout?.classList.remove("is-resizing");
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", stopResize);
+      document.removeEventListener("touchmove", onTouchMove);
+      document.removeEventListener("touchend", stopResize);
+    }}
+
+    function onMouseMove(e) {{
+      onResizeMove(e.clientX, e.clientY);
+    }}
+
+    function onTouchMove(e) {{
+      if (!e.touches.length) return;
+      e.preventDefault();
+      onResizeMove(e.touches[0].clientX, e.touches[0].clientY);
+    }}
+
+    function startResize(e) {{
+      if (e.type === "mousedown" && e.button !== 0) return;
+      if (isStackedLayout()) {{
+        resizeMode = "chat-height";
+        resizeStart = e.touches ? e.touches[0].clientY : e.clientY;
+        const h = parseInt(
+          getComputedStyle(document.documentElement).getPropertyValue("--chat-pane-height"),
+          10
+        );
+        resizeStartSize = Number.isNaN(h) ? chatSidebar.offsetHeight : h;
+      }} else {{
+        resizeMode = "sidebar";
+        resizeStart = e.touches ? e.touches[0].clientX : e.clientX;
+        resizeStartSize = chatSidebar.offsetWidth;
+      }}
+      appLayout?.classList.add("is-resizing");
+      if (e.type === "touchstart") {{
+        document.addEventListener("touchmove", onTouchMove, {{ passive: false }});
+        document.addEventListener("touchend", stopResize);
+      }} else {{
+        document.addEventListener("mousemove", onMouseMove);
+        document.addEventListener("mouseup", stopResize);
+      }}
+      e.preventDefault();
+    }}
+
+    paneResizer?.addEventListener("mousedown", startResize);
+    paneResizer?.addEventListener("touchstart", startResize, {{ passive: false }});
+
+    paneResizer?.addEventListener("keydown", (e) => {{
+      const step = e.shiftKey ? 40 : 16;
+      if (isStackedLayout()) {{
+        const current = parseInt(
+          getComputedStyle(document.documentElement).getPropertyValue("--chat-pane-height"),
+          10
+        ) || chatSidebar.offsetHeight;
+        if (e.key === "ArrowUp") {{
+          applyChatHeight(current - step, true);
+          e.preventDefault();
+        }} else if (e.key === "ArrowDown") {{
+          applyChatHeight(current + step, true);
+          e.preventDefault();
+        }}
+      }} else {{
+        const current = chatSidebar.offsetWidth;
+        if (e.key === "ArrowLeft") {{
+          applySidebarWidth(current + step, true);
+          e.preventDefault();
+        }} else if (e.key === "ArrowRight") {{
+          applySidebarWidth(current - step, true);
+          e.preventDefault();
+        }}
+      }}
+    }});
+
+    window.addEventListener("resize", () => {{
+      if (!isStackedLayout()) {{
+        const w = chatSidebar.offsetWidth;
+        applySidebarWidth(w, false);
+      }} else {{
+        const h = chatSidebar.offsetHeight;
+        applyChatHeight(h, false);
+      }}
+    }});
+
     let storedMessages = loadStoredMessages();
+
+    function showWelcomeMessage() {{
+      const welcomeEl = document.getElementById("chat-welcome-data");
+      const welcomeHtml = welcomeEl
+        ? JSON.parse(welcomeEl.textContent || "\"\"")
+        : "Ask about districts, severity, dates, or totals in this dataset.";
+      addMessage("assistant", welcomeHtml, true);
+      storedMessages = loadStoredMessages();
+    }}
+
+    function renderStoredMessages() {{
+      messages.innerHTML = "";
+      storedMessages.forEach((item) => {{
+        const el = document.createElement("div");
+        el.className = "msg " + item.role;
+        const label = document.createElement("div");
+        label.className = "msg-label";
+        label.textContent = item.role === "user" ? "You" : "Assistant";
+        el.appendChild(label);
+        const body = document.createElement("div");
+        if (item.isHtml) {{
+          body.innerHTML = item.text;
+        }} else {{
+          body.textContent = item.text;
+        }}
+        el.appendChild(body);
+        messages.appendChild(el);
+      }});
+      messages.scrollTop = messages.scrollHeight;
+    }}
+
+    async function resetServerChat() {{
+      const url = apiUrl("/api/chat/reset");
+      if (!url) return;
+      try {{
+        await fetchWithTimeout(url, fetchOptions("POST", {{}}), 15000);
+      }} catch (err) {{
+        console.warn("Could not reset server chat context", err);
+      }}
+    }}
+
+    function setChatControlsDisabled(disabled) {{
+      clearBtn.disabled = disabled;
+      newSessionBtn.disabled = disabled;
+      downloadBtn.disabled = disabled;
+    }}
+
+    async function clearChatSession() {{
+      if (chatInFlight) return;
+      if (storedMessages.length === 0) {{
+        setStatus("Chat is already empty.", false);
+        return;
+      }}
+      if (!window.confirm("Clear all messages in this chat session?")) return;
+
+      setChatControlsDisabled(true);
+      await resetServerChat();
+      storedMessages = [];
+      saveStoredMessages([]);
+      messages.innerHTML = "";
+      showWelcomeMessage();
+      setStatus("Chat cleared.", false);
+      setChatControlsDisabled(false);
+    }}
+
+    async function startNewChatSession() {{
+      if (chatInFlight) return;
+      if (
+        storedMessages.length > 0 &&
+        !window.confirm("Start a new chat session? Current messages will be cleared.")
+      ) {{
+        return;
+      }}
+
+      setChatControlsDisabled(true);
+      sessionStorage.setItem(SESSION_STORAGE_KEY, String(Date.now()));
+      await resetServerChat();
+      storedMessages = [];
+      saveStoredMessages([]);
+      messages.innerHTML = "";
+      showWelcomeMessage();
+      setStatus("New chat session started.", false);
+      setChatControlsDisabled(false);
+    }}
+
+    clearBtn?.addEventListener("click", clearChatSession);
+    newSessionBtn?.addEventListener("click", startNewChatSession);
 
     function addMessage(role, text, isHtml) {{
       const el = document.createElement("div");
@@ -624,31 +1041,9 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
     }}
 
     if (storedMessages.length === 0) {{
-      const welcomeEl = document.getElementById("chat-welcome-data");
-      const welcomeHtml = welcomeEl
-        ? JSON.parse(welcomeEl.textContent || "\"\"")
-        : "Ask about districts, severity, dates, or totals in this dataset.";
-      addMessage("assistant", welcomeHtml, true);
-      storedMessages = loadStoredMessages();
+      showWelcomeMessage();
     }} else {{
-      messages.innerHTML = "";
-      storedMessages.forEach((item) => {{
-        const el = document.createElement("div");
-        el.className = "msg " + item.role;
-        const label = document.createElement("div");
-        label.className = "msg-label";
-        label.textContent = item.role === "user" ? "You" : "Assistant";
-        el.appendChild(label);
-        const body = document.createElement("div");
-        if (item.isHtml) {{
-          body.innerHTML = item.text;
-        }} else {{
-          body.textContent = item.text;
-        }}
-        el.appendChild(body);
-        messages.appendChild(el);
-      }});
-      messages.scrollTop = messages.scrollHeight;
+      renderStoredMessages();
     }}
 
     form.addEventListener("submit", async (e) => {{
@@ -669,6 +1064,7 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
       }}
 
       chatInFlight = true;
+      setChatControlsDisabled(true);
       addMessage("user", text, false);
       input.value = "";
       sendBtn.disabled = true;
@@ -703,6 +1099,7 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
         setStatus("", false);
       }} finally {{
         chatInFlight = false;
+        setChatControlsDisabled(false);
         reportMain?.classList.remove("main-updating");
         sendBtn.disabled = false;
         sendBtn.classList.remove("loading");

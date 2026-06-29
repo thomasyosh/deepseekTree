@@ -368,6 +368,14 @@ def chat(request: ChatRequest) -> dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+@app.post("/api/chat/reset")
+def reset_chat_session() -> dict[str, str]:
+    """Clear server-side LLM conversation context for a fresh chat."""
+    global _chat_history
+    _chat_history = []
+    return {"status": "ok"}
+
+
 @app.post("/api/chat/export")
 def export_chat_report(request: ChatExportRequest) -> Response:
     """Build a downloadable HTML report from the user's chat session."""
