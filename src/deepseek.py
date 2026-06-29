@@ -283,7 +283,12 @@ def build_chat_messages(
     return messages
 
 
-def analyze(data_path: Path | None = None, report_path: Path | None = None) -> Path:
+def analyze(
+    data_path: Path | None = None,
+    report_path: Path | None = None,
+    *,
+    use_llm: bool = True,
+) -> Path:
     data_path = data_path or config.DATA_PATH
     report_path = report_path or config.REPORT_PATH
 
@@ -301,17 +306,22 @@ def analyze(data_path: Path | None = None, report_path: Path | None = None) -> P
     )
 
     narrative = (
-        "<p><em>AI analysis unavailable. Review the summary tables above.</em></p>"
+        "<p><em>Summary refreshed from latest data. "
+        "Use POST /api/refresh for full AI narrative.</em></p>"
     )
-    try:
-        narrative = llm_client.chat_completion(
-            build_analysis_messages(summary),
-            model=config.REPORT_MODEL,
-            max_tokens=1200,
-            timeout=config.OLLAMA_TIMEOUT,
-        )
-    except requests.exceptions.RequestException as e:
-        filelogger.logger.error(f"LLM analysis failed: {e}")
+    if use_llm:
+        try:
+            narrative = llm_client.chat_completion(
+                build_analysis_messages(summary),
+                model=config.REPORT_MODEL,
+                max_tokens=1200,
+                timeout=config.OLLAMA_TIMEOUT,
+            )
+        except requests.exceptions.RequestException as e:
+            filelogger.logger.error(f"LLM analysis failed: {e}")
+            narrative = (
+                "<p><em>AI analysis unavailable. Review the summary tables above.</em></p>"
+            )
     html = build_report_html(summary, narrative)
     report_path.write_text(html, encoding="utf-8")
     filelogger.logger.info(f"Report written to {report_path}")

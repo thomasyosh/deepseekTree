@@ -109,8 +109,9 @@ def index() -> HTMLResponse:
         return HTMLResponse(config.REPORT_PATH.read_text(encoding="utf-8"))
     return HTMLResponse(
         "<h1>No report yet</h1>"
-        "<p>Data is loading or report generation is still in progress. "
-        "Try <code>POST /api/refresh</code> or check server logs.</p>",
+        "<p>Data is loading or report generation is still in progress.</p>"
+        f"<p>Expected file: <code>{config.REPORT_PATH.resolve()}</code></p>"
+        "<p>Try <code>POST /api/refresh</code> or send a chat message to regenerate.</p>",
         status_code=404,
     )
 
@@ -143,13 +144,28 @@ def chat(request: ChatRequest) -> dict[str, str]:
         raise HTTPException(status_code=400, detail="Message cannot be empty")
 
     try:
+        if not pipeline.refresh_dataset(
+            generate_report=True,
+            report_use_llm=config.REFRESH_REPORT_ON_CHAT,
+        ):
+            raise HTTPException(
+                status_code=503,
+                detail="Could not refresh data from ENDPOINT. Check ENDPOINT, API_KEY, and logs.",
+            )
+        _invalidate_cache()
         rows, summary = _load_dataset()
 
         local_reply = try_answer_locally(message, rows, summary)
         if local_reply:
             _chat_history.append({"role": "user", "content": message})
             _chat_history.append({"role": "assistant", "content": local_reply})
-            return {"reply": local_reply, "source": "local"}
+            return {
+                "reply": local_reply,
+                "source": "local",
+                "data_refreshed": True,
+                "record_count": len(rows),
+                "report_url": "/report.html" if config.REPORT_PATH.exists() else None,
+            }
 
         messages = deepseek.build_chat_messages(
             summary, _chat_history, message, rows=rows
@@ -212,7 +228,13 @@ def chat(request: ChatRequest) -> dict[str, str]:
 
         _chat_history.append({"role": "user", "content": message})
         _chat_history.append({"role": "assistant", "content": reply})
-        return {"reply": reply, "source": source}
+        return {
+            "reply": reply,
+            "source": source,
+            "data_refreshed": True,
+            "record_count": len(rows),
+            "report_url": "/report.html" if config.REPORT_PATH.exists() else None,
+        }
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except Exception as e:
@@ -223,9 +245,15 @@ def chat(request: ChatRequest) -> dict[str, str]:
 @app.post("/api/refresh")
 def refresh() -> dict[str, str]:
     _invalidate_cache()
-    if not pipeline.run_pipeline():
+    if not pipeline.refresh_dataset(generate_report=True):
         raise HTTPException(status_code=500, detail="Pipeline failed. Check logs.")
-    return {"status": "ok", "message": "Data refreshed and report regenerated"}
+    return {
+        "status": "ok",
+        "message": "Data refreshed and report regenerated",
+        "data_path": str(config.DATA_PATH.resolve()),
+        "report_path": str(config.REPORT_PATH.resolve()),
+        "report_url": "/report.html",
+    }
 
 
 @app.get("/report.html")

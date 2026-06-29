@@ -60,6 +60,28 @@ def dataset_is_ready(data_path: Path | None = None) -> bool:
         return False
 
 
+def refresh_dataset(*, generate_report: bool = True, report_use_llm: bool = False) -> bool:
+    """Fetch fresh data.json from ENDPOINT and optionally regenerate report.html."""
+    if not config.ENDPOINT:
+        filelogger.logger.error("ENDPOINT is not set in .env")
+        return dataset_is_ready()
+
+    filelogger.logger.info("Refreshing data.json from ENDPOINT")
+    if not fetch_data():
+        filelogger.logger.error("Failed to fetch fresh data from ENDPOINT")
+        return False
+
+    if generate_report:
+        try:
+            report_path = deepseek.analyze(use_llm=report_use_llm)
+            filelogger.logger.info(f"Report written to {report_path.resolve()}")
+        except Exception as e:
+            filelogger.logger.error(f"Report generation failed: {e}")
+            return False
+
+    return True
+
+
 def ensure_dataset(*, generate_report: bool = True) -> bool:
     """Load data.json from ENDPOINT when the file is missing or empty."""
     if dataset_is_ready():
@@ -84,7 +106,7 @@ def ensure_dataset(*, generate_report: bool = True) -> bool:
 
     if generate_report:
         try:
-            deepseek.analyze()
+            deepseek.analyze(use_llm=True)
         except Exception as e:
             filelogger.logger.error(f"Report generation failed: {e}")
 
@@ -92,15 +114,7 @@ def ensure_dataset(*, generate_report: bool = True) -> bool:
 
 
 def run_pipeline() -> bool:
-    if not fetch_data():
-        return False
-
-    try:
-        deepseek.analyze()
-        return True
-    except Exception as e:
-        filelogger.logger.error(f"Analysis failed: {e}")
-        return False
+    return refresh_dataset(generate_report=True, report_use_llm=True)
 
 
 def main() -> None:
