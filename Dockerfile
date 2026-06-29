@@ -23,7 +23,11 @@ ENV HTTP_PROXY=$HTTP_PROXY \
 
 COPY requirements.txt .
 RUN HTTP_PROXY= HTTPS_PROXY= http_proxy= https_proxy= ALL_PROXY= NO_PROXY='*' \
-    pip install --no-cache-dir -r requirements.txt
+    pip install --no-cache-dir \
+    --trusted-host pypi.org \
+    --trusted-host pypi.python.org \
+    --trusted-host files.pythonhosted.org \
+    -r requirements.txt
 
 COPY src/ ./src/
 

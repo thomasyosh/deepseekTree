@@ -23,12 +23,16 @@ def fetch_data(data_path: Path | None = None) -> bool:
     proxies = config.parse_proxy(config.PROXY)
 
     try:
-        filelogger.logger.info(f"Sending GET request to {config.ENDPOINT}")
+        filelogger.logger.info(
+            f"Sending GET request to {config.ENDPOINT} "
+            f"(verify_ssl={config.VERIFY_SSL})"
+        )
         response = requests.get(
             config.ENDPOINT,
             headers=headers,
             proxies=proxies,
             timeout=60,
+            verify=config.VERIFY_SSL,
         )
         response.raise_for_status()
 

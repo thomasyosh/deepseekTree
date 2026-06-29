@@ -30,6 +30,13 @@ def parse_proxy(proxy_value: str | None) -> dict[str, str] | None:
     return {"http": proxy_value, "https": proxy_value}
 
 
+def _env_bool(name: str, default: bool = True) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 # Explicitly disable proxy for local services (e.g. Ollama on localhost).
 NO_PROXY: dict[str, None] = {"http": None, "https": None}
 
@@ -39,6 +46,7 @@ REPORT_PATH = ROOT / "report.html"
 ENDPOINT = os.getenv("ENDPOINT")
 API_KEY = os.getenv("API_KEY")
 PROXY = os.getenv("PROXY")
+VERIFY_SSL = _env_bool("VERIFY_SSL", default=True)
 AI_MODEL = os.getenv("AI_MODEL", "deepseek-r1:7b")
 CHAT_MODEL = os.getenv("CHAT_MODEL") or AI_MODEL
 REPORT_MODEL = os.getenv("REPORT_MODEL") or AI_MODEL
@@ -54,3 +62,8 @@ OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "180"))
 CHAT_TIMEOUT = int(os.getenv("CHAT_TIMEOUT", "60"))
 CHAT_MAX_TOKENS = int(os.getenv("CHAT_MAX_TOKENS", "256"))
 API_BASE_URL = os.getenv("API_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
+
+if not VERIFY_SSL:
+    import urllib3
+
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)

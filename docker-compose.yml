@@ -67,6 +67,7 @@ services:
       REPORT_MODEL: deepseek-r1:7b
       API_BASE_URL: http://127.0.0.1:8000
       PROXY: ""
+      VERIFY_SSL: "false"
     depends_on:
       init-model:
         condition: service_completed_successfully
