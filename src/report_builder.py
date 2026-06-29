@@ -694,6 +694,9 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
         const suffix = data.source ? " [" + data.source + "]" : "";
         addMessage("assistant", data.reply, true);
         setStatus("Done" + suffix + (data.record_count ? " · " + data.record_count + " records" : ""), false);
+        if (data.trigger_download) {{
+          await downloadChatReport();
+        }}
       }} catch (err) {{
         removeThinking();
         addMessage("assistant", "Error: " + formatFetchError(err), false);
@@ -708,6 +711,20 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
       }}
     }});
 
+    function isExportPhrase(text) {{
+      const t = (text || "").toLowerCase();
+      return [
+        "download report", "download chat", "export report", "export chat",
+        "save report", "get report", "下載報告", "下载报告", "導出報告", "导出报告",
+      ].some((phrase) => t.includes(phrase));
+    }}
+
+    function countUserQuestions() {{
+      return storedMessages.filter(
+        (m) => m.role === "user" && !isExportPhrase(m.text)
+      ).length;
+    }}
+
     function parseDownloadFilename(header) {{
       if (!header) return null;
       const match = /filename=\"?([^\";]+)\"?/i.exec(header);
@@ -715,9 +732,8 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
     }}
 
     async function downloadChatReport() {{
-      const userMsgs = storedMessages.filter((m) => m.role === "user");
-      if (userMsgs.length === 0) {{
-        setStatus("Ask at least one question before downloading.", false);
+      if (countUserQuestions() === 0) {{
+        setStatus("Ask at least one data question before downloading.", false);
         return;
       }}
 

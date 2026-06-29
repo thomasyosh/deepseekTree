@@ -143,3 +143,30 @@ def is_too_vague(message: str) -> bool:
     if cleaned.lower() in {"hi", "hello", "hey", "help", "?", "你好", "嗨"}:
         return True
     return False
+
+
+_EXPORT_PHRASES: tuple[str, ...] = (
+    "download report",
+    "download chat",
+    "download html",
+    "export report",
+    "export chat",
+    "export html",
+    "save report",
+    "save chat",
+    "get report",
+    "下載報告",
+    "下载报告",
+    "導出報告",
+    "导出报告",
+    "下載聊天",
+    "导出聊天",
+)
+
+
+def is_export_request(message: str) -> bool:
+    """User wants to download an HTML report of their chat session."""
+    cleaned = normalize_user_message(message).lower().strip()
+    if not cleaned or len(cleaned) > 100:
+        return False
+    return any(phrase in cleaned for phrase in _EXPORT_PHRASES)

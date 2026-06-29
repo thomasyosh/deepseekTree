@@ -18,6 +18,8 @@ import main as pipeline
 from query_engine import try_answer_locally
 from summary import build_summary
 from fastapi.middleware.cors import CORSMiddleware
+from chat_normalize import is_export_request
+from prompts import build_export_ready_html
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -110,6 +112,7 @@ def _chat_response(
     rows: list[dict[str, Any]],
     summary: dict[str, Any],
     data_refreshed: bool,
+    trigger_download: bool = False,
 ) -> dict[str, Any]:
     return {
         "reply": reply,
@@ -118,6 +121,7 @@ def _chat_response(
         "data_refreshed": data_refreshed,
         "record_count": len(rows),
         "summary": summary,
+        "trigger_download": trigger_download,
         "report_url": "/report.html" if config.REPORT_PATH.exists() else None,
     }
 
@@ -248,6 +252,21 @@ def chat(request: ChatRequest) -> dict[str, Any]:
 
         rows, summary = _load_dataset()
 
+        if is_export_request(message):
+            _chat_history.append({"role": "user", "content": message})
+            reply = build_export_ready_html()
+            _chat_history.append({"role": "assistant", "content": reply})
+            chat_log.log_chat(message, reply=reply, source="export", record_count=len(rows))
+            return _chat_response(
+                reply=reply,
+                source="export",
+                message=message,
+                rows=rows,
+                summary=summary,
+                data_refreshed=should_refresh,
+                trigger_download=True,
+            )
+
         local_reply = try_answer_locally(message, rows, summary)
         if local_reply:
             _chat_history.append({"role": "user", "content": message})
@@ -370,7 +389,7 @@ def export_chat_report(request: ChatExportRequest) -> Response:
     html_content = chat_export.build_chat_export_html(
         payload,
         summary,
-        title=request.title,
+        title=request.title or "Tree Complaint Analysis — Chat Report",
     )
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     filename = f"tree-chat-report-{stamp}.html"

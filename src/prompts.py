@@ -119,6 +119,8 @@ def build_chat_welcome_html() -> str:
         "<p>Ask about <strong>districts</strong>, <strong>severity</strong>, "
         "<strong>dates</strong>, <strong>status</strong>, or <strong>totals</strong>. "
         "Typos are OK — we interpret common misspellings.</p>"
+        "<p>When finished, type <code>download report</code> or click "
+        "<strong>Download chat report</strong> to save your Q&amp;A as HTML.</p>"
         f"<p><strong>Examples:</strong></p><ol>{items}</ol></section>"
     )
 
@@ -135,6 +137,23 @@ def build_clarification_html(reason: str) -> str:
 def build_scope_redirect_html() -> str:
     return build_clarification_html(
         "I can only answer questions about the tree complaint dataset shown in this report."
+    )
+
+
+def build_export_ready_html() -> str:
+    return (
+        '<section class="query-result"><h3>Downloading your report</h3>'
+        "<p>Building an HTML file from <strong>your questions and answers</strong> "
+        "in this chat session.</p>"
+        "<p>If the download does not start, click <strong>Download chat report</strong> "
+        "below the chat box.</p></section>"
+    )
+
+
+def build_export_need_questions_html() -> str:
+    return build_clarification_html(
+        "Ask at least one question about the data first, then type "
+        '"download report" or click Download chat report.'
     )
 
 
