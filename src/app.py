@@ -267,7 +267,7 @@ def chat(request: ChatRequest) -> dict[str, Any]:
                 trigger_download=True,
             )
 
-        local_reply = try_answer_locally(message, rows, summary)
+        local_reply, filtered_summary = try_answer_locally(message, rows, summary)
         if local_reply:
             _chat_history.append({"role": "user", "content": message})
             _chat_history.append({"role": "assistant", "content": local_reply})
@@ -282,7 +282,7 @@ def chat(request: ChatRequest) -> dict[str, Any]:
                 source="local",
                 message=message,
                 rows=rows,
-                summary=summary,
+                summary=filtered_summary or summary,
                 data_refreshed=should_refresh,
             )
 

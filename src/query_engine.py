@@ -167,8 +167,31 @@ def _date_facts(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _extract_year_filter(message: str) -> tuple[str | None, str | None]:
+    """Parse a calendar year (e.g. 2025) from natural language — not case_no tokens."""
+    patterns = [
+        r"(?:only|just|show|filter|display|adjust(?:\s+the)?\s+report(?:\s+to\s+show)?)\s+(?:only\s+)?(20\d{2})\b",
+        r"\b(20\d{2})\s+cases?\b",
+        r"cases?\s+(?:in|from|during)\s+(20\d{2})\b",
+        r"(?:in|for|during)\s+(20\d{2})\b(?!\d)",
+        r"\b(20\d{2})\s*年",
+        r"year\s+(20\d{2})\b",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, message, re.IGNORECASE)
+        if match:
+            year = int(match.group(1))
+            if 2000 <= year <= 2099:
+                return f"{year}-01-01", f"{year}-12-31"
+    return None, None
+
+
 def _extract_date_range(message: str) -> tuple[str | None, str | None]:
     """Parse start/end dates from free text. End defaults to today when requested."""
+    year_range = _extract_year_filter(message)
+    if year_range[0]:
+        return year_range
+
     lower = message.lower()
     today = date.today().isoformat()
 
@@ -344,6 +367,45 @@ def _overview_html(summary: dict[str, Any]) -> str:
     )
 
 
+def _period_report_html(
+    summary: dict[str, Any],
+    sample_cases: list[dict[str, Any]],
+    start: str | None,
+    end: str | None,
+) -> str:
+    """Structured HTML for a date/year filtered slice of the dataset."""
+    dr = summary.get("date_range", ["—", "—"])
+    period = f"{start or dr[0]} → {end or dr[1]}"
+    districts = Counter(summary.get("by_district", {})).most_common(5)
+    district_rows = "".join(
+        f"<li><strong>{html.escape(name)}</strong>: {count} cases</li>"
+        for name, count in districts
+    ) or "<li>No cases in this period.</li>"
+    severity = summary.get("by_severity", {})
+    severity_rows = "".join(
+        f"<li><strong>{html.escape(name)}</strong>: {count}</li>"
+        for name, count in sorted(severity.items(), key=lambda item: item[1], reverse=True)
+    ) or "<li>—</li>"
+    status = summary.get("by_status", {})
+    status_rows = "".join(
+        f"<li><strong>{html.escape(name)}</strong>: {count}</li>"
+        for name, count in sorted(status.items(), key=lambda item: item[1], reverse=True)[:5]
+    ) or "<li>—</li>"
+
+    return (
+        f'<section class="query-result"><h3>Filtered report</h3>'
+        f"<p>Showing <strong>{summary.get('total_cases', 0)}</strong> cases where "
+        f"<code>case_date</code> is between "
+        f"<strong>{html.escape(period)}</strong>.</p>"
+        f"<ul><li><strong>Total trees:</strong> {summary.get('total_trees', 0)}</li></ul>"
+        f"<h3>Top districts</h3><ol>{district_rows}</ol>"
+        f"<h3>By severity</h3><ul>{severity_rows}</ul>"
+        f"<h3>By status</h3><ul>{status_rows}</ul>"
+        f"</section>"
+        + _cases_table_html("Sample cases in this period", sample_cases)
+    )
+
+
 def _rank_districts(rows: list[dict[str, Any]], message: str, limit: int) -> list[tuple[str, int]]:
     if _wants_severe(message):
         counts = Counter(r["district"] for r in rows if r.get("severity") == "嚴重")
@@ -492,15 +554,10 @@ def execute_query(
         )
 
     start, end = _extract_date_range(message)
-    if start or end:
-        data = {
-            "total_cases": summary.get("total_cases", 0),
-            "total_trees": summary.get("total_trees", 0),
-            "date_range": summary.get("date_range"),
-            "by_severity": summary.get("by_severity", {}),
-            "by_status": summary.get("by_status", {}),
-        }
-        return _with_banner(banner, _overview_html(summary)), Intent.OVERVIEW, data
+    if banner or start or end:
+        sample = _sort_cases(rows, message, min(max(_extract_limit(message, 10), 10), 15))
+        body = _period_report_html(summary, sample, start, end)
+        return _with_banner(banner, body), Intent.FILTER, summary
 
     return None, intent, None
 
@@ -513,16 +570,17 @@ def try_answer_locally(
     message: str,
     rows: list[dict[str, Any]],
     summary: dict[str, Any],
-) -> str | None:
+) -> tuple[str | None, dict[str, Any] | None]:
     normalized = normalize_user_message(message)
     query_text = normalized or message.strip()
 
     preflight = try_preflight_reply(query_text)
     if preflight:
-        return preflight
+        return preflight, None
 
-    html_out, _, _ = execute_query(query_text, rows, summary)
-    return html_out
+    html_out, _, data = execute_query(query_text, rows, summary)
+    filtered_summary = data if isinstance(data, dict) and "total_cases" in data else None
+    return html_out, filtered_summary
 
 
 def build_llm_prompt(

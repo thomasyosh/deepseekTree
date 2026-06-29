@@ -30,7 +30,8 @@ _TYPO_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\bsummery\b", re.I), "summary"),
     (re.compile(r"\bniumber\b", re.I), "number"),
     (re.compile(r"\bamout\b", re.I), "amount"),
-    (re.compile(r"\bhowmany\b", re.I), "how many"),
+    (re.compile(r"\badjust\s+the\s+report\b", re.I), "show"),
+    (re.compile(r"\bonly\s+(20\d{2})\b", re.I), r"only \1 cases"),
     (re.compile(r"\bhw many\b", re.I), "how many"),
 ]
 
