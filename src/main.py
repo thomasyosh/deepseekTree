@@ -49,6 +49,48 @@ def fetch_data(data_path: Path | None = None) -> bool:
         return False
 
 
+def dataset_is_ready(data_path: Path | None = None) -> bool:
+    data_path = data_path or config.DATA_PATH
+    if not data_path.exists():
+        return False
+    try:
+        rows = json.loads(data_path.read_text(encoding="utf-8"))
+        return isinstance(rows, list) and bool(rows)
+    except (json.JSONDecodeError, ValueError):
+        return False
+
+
+def ensure_dataset(*, generate_report: bool = True) -> bool:
+    """Load data.json from ENDPOINT when the file is missing or empty."""
+    if dataset_is_ready():
+        rows = json.loads(config.DATA_PATH.read_text(encoding="utf-8"))
+        filelogger.logger.info(
+            f"Using existing {config.DATA_PATH.name} ({len(rows)} records)"
+        )
+        return True
+
+    if not config.ENDPOINT:
+        filelogger.logger.warning(
+            f"{config.DATA_PATH.name} missing and ENDPOINT is not set in .env"
+        )
+        return False
+
+    filelogger.logger.info(
+        f"{config.DATA_PATH.name} missing or empty; fetching from ENDPOINT"
+    )
+    if not fetch_data():
+        filelogger.logger.error("Failed to fetch dataset on startup")
+        return False
+
+    if generate_report:
+        try:
+            deepseek.analyze()
+        except Exception as e:
+            filelogger.logger.error(f"Report generation failed: {e}")
+
+    return True
+
+
 def run_pipeline() -> bool:
     if not fetch_data():
         return False

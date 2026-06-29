@@ -1,4 +1,5 @@
 import json
+from contextlib import asynccontextmanager
 from typing import Any
 
 import requests
@@ -14,7 +15,14 @@ from query_engine import try_answer_locally
 from summary import build_summary
 from fastapi.middleware.cors import CORSMiddleware
 
-app = FastAPI(title="Tree Complaint Analyst")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    filelogger.logger.info("Startup: ensuring dataset is available")
+    pipeline.ensure_dataset(generate_report=True)
+    yield
+
+
+app = FastAPI(title="Tree Complaint Analyst", lifespan=lifespan)
 
 
 app.add_middleware(
@@ -47,8 +55,11 @@ def _load_dataset() -> tuple[list[dict[str, Any]], dict[str, Any]]:
     if _cached_rows is not None and _cached_summary is not None:
         return _cached_rows, _cached_summary
 
-    if not config.DATA_PATH.exists():
-        raise FileNotFoundError("data.json not found. Run the pipeline first.")
+    if not config.DATA_PATH.exists() or not pipeline.dataset_is_ready():
+        if not pipeline.ensure_dataset(generate_report=False):
+            raise FileNotFoundError(
+                "data.json not found. Set ENDPOINT in .env or POST /api/refresh."
+            )
 
     rows = json.loads(config.DATA_PATH.read_text(encoding="utf-8"))
     if not isinstance(rows, list):
@@ -71,7 +82,9 @@ def index() -> HTMLResponse:
     if config.REPORT_PATH.exists():
         return HTMLResponse(config.REPORT_PATH.read_text(encoding="utf-8"))
     return HTMLResponse(
-        "<h1>No report yet</h1><p>Run <code>python -m main</code> from the project root.</p>",
+        "<h1>No report yet</h1>"
+        "<p>Data is loading or report generation is still in progress. "
+        "Try <code>POST /api/refresh</code> or check server logs.</p>",
         status_code=404,
     )
 
