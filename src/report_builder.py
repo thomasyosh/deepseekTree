@@ -340,8 +340,6 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
       }}
     }}
 
-    checkApiConnection();
-
     const reportMain = document.getElementById("report-main");
     const reportOverview = document.getElementById("report-overview");
     const reportTables = document.getElementById("report-tables");
@@ -413,7 +411,11 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
       }}
     }}
 
-    if (!isFilePage) loadLatestSummary();
+    if (!isFilePage) {{
+      checkApiConnection().then((ok) => {{
+        if (ok) loadLatestSummary();
+      }});
+    }}
 
     let thinkingEl = null;
 
@@ -458,8 +460,8 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
         }}
         return (
           "Failed to fetch — browser could not reach the API. " +
-          "Confirm the server is running at " + window.location.origin +
-          ", reload this page, and check DevTools → Network for /api/chat."
+          "Use " + apiBase + "/ (not Live Server) if this keeps happening. " +
+          "Also avoid --reload while chatting — server restarts drop in-flight requests."
         );
       }}
       return err.message || String(err);
@@ -471,6 +473,84 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
       return JSON.stringify(detail);
     }}
 
+    let chatInFlight = false;
+    const dataRefreshTimeoutMs = 90000;
+
+    function fetchOptions(method, body) {{
+      const opts = {{
+        method,
+        credentials: isFastApiOrigin() ? "same-origin" : "omit",
+        mode: "cors",
+      }};
+      if (body != null) {{
+        opts.headers = {{ "Content-Type": "application/json" }};
+        opts.body = JSON.stringify(body);
+      }}
+      return opts;
+    }}
+
+    function fetchWithTimeout(url, options, timeoutMs) {{
+      return new Promise((resolve, reject) => {{
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        fetch(url, {{ ...options, signal: controller.signal }})
+          .then(resolve)
+          .catch(reject)
+          .finally(() => clearTimeout(timer));
+      }});
+    }}
+
+    async function parseJsonResponse(res) {{
+      const raw = await res.text();
+      let data;
+      try {{
+        data = JSON.parse(raw);
+      }} catch {{
+        throw new Error(
+          "API returned non-JSON (status " + res.status + "). " +
+          "Reload from " + (isFastApiOrigin() ? window.location.origin : apiBase) + "/"
+        );
+      }}
+      if (!res.ok) throw new Error(formatErrorDetail(data.detail));
+      return data;
+    }}
+
+    async function tryRefreshData() {{
+      const url = apiUrl("/api/data/refresh");
+      if (!url) return false;
+      try {{
+        const res = await fetchWithTimeout(
+          url,
+          fetchOptions("POST", {{}}),
+          dataRefreshTimeoutMs
+        );
+        const data = await parseJsonResponse(res);
+        if (data.summary) updateReportPane(data.summary, data.record_count);
+        return true;
+      }} catch (err) {{
+        console.warn("Data refresh failed; continuing with cached data", err);
+        return false;
+      }}
+    }}
+
+    async function postChat(text, allowRetry) {{
+      const endpoint = chatEndpoint();
+      try {{
+        const res = await fetchWithTimeout(
+          endpoint,
+          fetchOptions("POST", {{ message: text, refresh_data: false }}),
+          clientTimeoutMs
+        );
+        return parseJsonResponse(res);
+      }} catch (err) {{
+        if (allowRetry && err.message === "Failed to fetch") {{
+          setStatus("Connection dropped — retrying once...", true);
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+          return postChat(text, false);
+        }}
+        throw err;
+      }}
+    }}
     const form = document.getElementById("chat-form");
     const input = document.getElementById("chat-input");
     const sendBtn = document.getElementById("chat-send");
@@ -547,20 +627,21 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
     form.addEventListener("submit", async (e) => {{
       e.preventDefault();
       const text = input.value.trim();
-      if (!text) return;
+      if (!text || chatInFlight) return;
 
       const endpoint = chatEndpoint();
       if (!endpoint) {{
         addMessage(
           "assistant",
           "Chat only works when this page is served by FastAPI at " +
-            configuredApiBase +
+            apiBase +
             "/ — not when opening report.html from disk.",
           false
         );
         return;
       }}
 
+      chatInFlight = true;
       addMessage("user", text, false);
       input.value = "";
       sendBtn.disabled = true;
@@ -568,34 +649,17 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
       sendBtn.textContent = "Sending";
       showThinking();
       reportMain?.classList.add("main-updating");
-      setStatus(
-        "Request sent — refreshing data, then waiting for Ollama (may take several minutes on CPU).",
-        true
-      );
-
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), clientTimeoutMs);
 
       try {{
-        const res = await fetch(endpoint, {{
-          method: "POST",
-          headers: {{ "Content-Type": "application/json" }},
-          body: JSON.stringify({{ message: text }}),
-          credentials: isFastApiOrigin() ? "same-origin" : "omit",
-          mode: "cors",
-          signal: controller.signal,
-        }});
-        const raw = await res.text();
-        let data;
-        try {{
-          data = JSON.parse(raw);
-        }} catch {{
-          throw new Error(
-            "API returned non-JSON (status " + res.status + "). " +
-            "Reload from " + window.location.origin + "/ (not a saved report.html file)."
-          );
-        }}
-        if (!res.ok) throw new Error(formatErrorDetail(data.detail));
+        setStatus("Step 1/2 — refreshing data from Supabase...", true);
+        const refreshed = await tryRefreshData();
+        setStatus(
+          (refreshed ? "Data refreshed. " : "Using cached data. ") +
+            "Step 2/2 — waiting for AI (may take several minutes on CPU)...",
+          true
+        );
+
+        const data = await postChat(text, true);
         removeThinking();
         if (data.summary) {{
           updateReportPane(data.summary, data.record_count);
@@ -608,7 +672,7 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
         addMessage("assistant", "Error: " + formatFetchError(err), false);
         setStatus("", false);
       }} finally {{
-        clearTimeout(timer);
+        chatInFlight = false;
         reportMain?.classList.remove("main-updating");
         sendBtn.disabled = false;
         sendBtn.classList.remove("loading");

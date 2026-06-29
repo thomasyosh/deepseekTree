@@ -75,6 +75,16 @@ _cached_summary: dict[str, Any] | None = None
 
 class ChatRequest(BaseModel):
     message: str
+    refresh_data: bool | None = None
+
+
+def _refresh_dataset_or_raise() -> None:
+    if not pipeline.refresh_dataset(generate_report=False):
+        raise HTTPException(
+            status_code=503,
+            detail="Could not refresh data from ENDPOINT. Check ENDPOINT, API_KEY, and logs.",
+        )
+    _invalidate_data_cache()
 
 
 def _chat_response(
@@ -84,12 +94,13 @@ def _chat_response(
     message: str,
     rows: list[dict[str, Any]],
     summary: dict[str, Any],
+    data_refreshed: bool,
 ) -> dict[str, Any]:
     return {
         "reply": reply,
         "source": source,
         "question": message,
-        "data_refreshed": True,
+        "data_refreshed": data_refreshed,
         "record_count": len(rows),
         "summary": summary,
         "report_url": "/report.html" if config.REPORT_PATH.exists() else None,
@@ -178,20 +189,48 @@ def get_summary() -> dict[str, Any]:
         raise HTTPException(status_code=404, detail=str(e)) from e
 
 
+@app.post("/api/data/refresh")
+def refresh_data_only() -> dict[str, Any]:
+    """Fetch fresh data.json from Supabase (fast). Used before chat to update the report pane."""
+    if not config.ENDPOINT:
+        raise HTTPException(
+            status_code=503,
+            detail="ENDPOINT is not set in .env — cannot refresh data.",
+        )
+    try:
+        _refresh_dataset_or_raise()
+        rows, summary = _load_dataset()
+        return {
+            "ok": True,
+            "record_count": len(rows),
+            "summary": summary,
+        }
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+
+
 @app.post("/api/chat")
 def chat(request: ChatRequest) -> dict[str, Any]:
     message = request.message.strip()
     if not message:
         raise HTTPException(status_code=400, detail="Message cannot be empty")
 
+    should_refresh = (
+        request.refresh_data
+        if request.refresh_data is not None
+        else config.REFRESH_DATA_ON_CHAT
+    )
+
     try:
-        if not pipeline.refresh_dataset(generate_report=False):
-            chat_log.log_chat(message, error="data refresh failed")
-            raise HTTPException(
-                status_code=503,
-                detail="Could not refresh data from ENDPOINT. Check ENDPOINT, API_KEY, and logs.",
-            )
-        _invalidate_data_cache()
+        if should_refresh:
+            if not pipeline.refresh_dataset(generate_report=False):
+                chat_log.log_chat(message, error="data refresh failed")
+                raise HTTPException(
+                    status_code=503,
+                    detail="Could not refresh data from ENDPOINT. Check ENDPOINT, API_KEY, and logs.",
+                )
+            _invalidate_data_cache()
+
         rows, summary = _load_dataset()
 
         local_reply = try_answer_locally(message, rows, summary)
@@ -210,6 +249,7 @@ def chat(request: ChatRequest) -> dict[str, Any]:
                 message=message,
                 rows=rows,
                 summary=summary,
+                data_refreshed=should_refresh,
             )
 
         messages = deepseek.build_chat_messages(
@@ -285,6 +325,7 @@ def chat(request: ChatRequest) -> dict[str, Any]:
             message=message,
             rows=rows,
             summary=summary,
+            data_refreshed=should_refresh,
         )
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e

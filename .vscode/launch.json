@@ -13,6 +13,18 @@
         //     }
         // },
         {
+            "name": "Run Web Server (stable)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "uvicorn",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "args": ["app:app", "--app-dir", "src", "--host", "127.0.0.1", "--port", "8000"],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
             "name": "Run Web Server",
             "type": "debugpy",
             "request": "launch",
