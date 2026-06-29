@@ -60,6 +60,7 @@ app.add_middleware(
         "http://127.0.0.1:5500",
         "http://localhost:5500",
     ],
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -120,6 +121,11 @@ def index() -> HTMLResponse:
         "<p>Try <code>POST /api/refresh</code> or send a chat message to regenerate.</p>",
         status_code=404,
     )
+
+
+@app.get("/api/health")
+def api_health() -> dict[str, str]:
+    return {"status": "ok"}
 
 
 @app.get("/api/llm-health")

@@ -6,3 +6,4 @@ report.html
 chat_log.jsonl
 docker/certs/*.crt
 docker/certs/*.pem
+logfile/app.log

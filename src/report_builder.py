@@ -153,11 +153,32 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
       font-weight: 600;
     }}
     .chat-input button:disabled {{ opacity: 0.6; cursor: not-allowed; }}
+    .chat-input button.loading::after {{
+      content: "…";
+      animation: dots 1.2s steps(4, end) infinite;
+    }}
+    @keyframes dots {{
+      0%, 20% {{ content: ""; }}
+      40% {{ content: "."; }}
+      60% {{ content: ".."; }}
+      80%, 100% {{ content: "..."; }}
+    }}
     .chat-status {{
-      padding: 0 1rem 0.5rem;
+      padding: 0.5rem 1rem;
       font-size: 0.85rem;
       color: var(--muted);
       min-height: 1.25rem;
+    }}
+    .chat-status.busy {{
+      color: var(--accent);
+      font-weight: 500;
+    }}
+    .msg.thinking {{
+      animation: pulse-thinking 1.5s ease-in-out infinite;
+    }}
+    @keyframes pulse-thinking {{
+      0%, 100% {{ opacity: 0.55; }}
+      50% {{ opacity: 1; }}
     }}
     .file-warning {{
       background: #fef3c7;
@@ -168,6 +189,9 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
       font-size: 0.85rem;
       display: none;
     }}
+    .file-warning a {{ color: #1d4ed8; }}
+    .conn-ok {{ color: #15803d; }}
+    .conn-bad {{ color: #b91c1c; }}
     @media (max-width: 900px) {{
       .layout {{ grid-template-columns: 1fr; }}
       .sidebar {{ height: 50vh; position: static; }}
@@ -205,29 +229,103 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
     );
     const clientTimeoutMs = (chatTimeoutSec + 120) * 1000;
 
-    const API_BASE = (() => {{
-      if (window.location.protocol === "file:") {{
-        return configuredApiBase;
+    const clientTimeoutMs = (chatTimeoutSec + 120) * 1000;
+    const isFilePage = window.location.protocol === "file:";
+
+    /** Same-origin relative path when served over HTTP — avoids CORS / wrong host. */
+    function chatEndpoint() {{
+      if (isFilePage) return null;
+      if (window.location.protocol === "http:" || window.location.protocol === "https:") {{
+        return "/api/chat";
       }}
-      if (window.location.port === "8000") {{
-        return window.location.origin;
-      }}
-      return configuredApiBase;
-    }})();
+      return configuredApiBase.replace(/\\/$/, "") + "/api/chat";
+    }}
 
     const statusEl = document.getElementById("chat-status");
     const fileWarning = document.getElementById("file-warning");
 
-    if (window.location.protocol === "file:") {{
+    if (isFilePage) {{
       fileWarning.style.display = "block";
       fileWarning.innerHTML =
-        "Opened as a local file — chat will not work. Use " +
+        "<strong>Chat disabled:</strong> this page was opened as a local file " +
+        "(<code>file://</code>). Browsers block that from calling the API. " +
+        "Open " +
         '<a href="' + configuredApiBase + '/" target="_blank" rel="noopener">' +
-        configuredApiBase + "/</a> in your browser instead.";
+        configuredApiBase + "/</a> instead (keep the server running).";
     }}
 
-    function setStatus(text) {{
+    async function checkApiConnection() {{
+      if (isFilePage) {{
+        setStatus("Not connected — open via " + configuredApiBase + "/", false);
+        return false;
+      }}
+      try {{
+        const res = await fetch("/api/health", {{ method: "GET", credentials: "same-origin" }});
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        setStatus("Connected to API at " + window.location.origin, false);
+        statusEl.classList.add("conn-ok");
+        return true;
+      }} catch (err) {{
+        setStatus(
+          "Cannot reach API at " + window.location.origin +
+          " — start the server, then reload this page.",
+          false
+        );
+        statusEl.classList.add("conn-bad");
+        console.error("API health check failed:", err);
+        return false;
+      }}
+    }}
+
+    checkApiConnection();
+
+    function setStatus(text, busy) {{
       statusEl.textContent = text || "";
+      statusEl.classList.toggle("busy", !!busy);
+    }}
+
+    let thinkingEl = null;
+
+    function showThinking() {{
+      removeThinking();
+      thinkingEl = document.createElement("div");
+      thinkingEl.className = "msg assistant thinking";
+      thinkingEl.id = "chat-thinking";
+      thinkingEl.innerHTML =
+        '<div class="msg-label">Assistant</div>' +
+        '<div>Working on your question…</div>';
+      messages.appendChild(thinkingEl);
+      messages.scrollTop = messages.scrollHeight;
+    }}
+
+    function removeThinking() {{
+      if (thinkingEl) {{
+        thinkingEl.remove();
+        thinkingEl = null;
+      }}
+    }}
+
+    function formatFetchError(err) {{
+      if (err.name === "AbortError") {{
+        return (
+          "Timed out in browser after " + Math.round(clientTimeoutMs / 1000) + "s. " +
+          "Increase CHAT_TIMEOUT in .env or try a simpler question."
+        );
+      }}
+      if (err.message === "Failed to fetch") {{
+        if (isFilePage) {{
+          return (
+            "Failed to fetch — you opened report.html as a file. " +
+            "Use " + configuredApiBase + "/ in the browser (not double-click report.html)."
+          );
+        }}
+        return (
+          "Failed to fetch — browser could not reach the API. " +
+          "Confirm the server is running at " + window.location.origin +
+          ", reload this page, and check DevTools → Network for /api/chat."
+        );
+      }}
+      return err.message || String(err);
     }}
 
     function formatErrorDetail(detail) {{
@@ -314,22 +412,38 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
       const text = input.value.trim();
       if (!text) return;
 
+      const endpoint = chatEndpoint();
+      if (!endpoint) {{
+        addMessage(
+          "assistant",
+          "Chat only works when this page is served by FastAPI at " +
+            configuredApiBase +
+            "/ — not when opening report.html from disk.",
+          false
+        );
+        return;
+      }}
+
       addMessage("user", text, false);
       input.value = "";
       sendBtn.disabled = true;
+      sendBtn.classList.add("loading");
+      sendBtn.textContent = "Sending";
+      showThinking();
       setStatus(
-        "Refreshing data and waiting for Ollama (may take several minutes on CPU)..."
+        "Request sent — refreshing data, then waiting for Ollama (may take several minutes on CPU).",
+        true
       );
 
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), clientTimeoutMs);
 
       try {{
-        const res = await fetch(API_BASE + "/api/chat", {{
+        const res = await fetch(endpoint, {{
           method: "POST",
           headers: {{ "Content-Type": "application/json" }},
           body: JSON.stringify({{ message: text }}),
-          credentials: "omit",
+          credentials: "same-origin",
           signal: controller.signal,
         }});
         const raw = await res.text();
@@ -339,23 +453,23 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
         }} catch {{
           throw new Error(
             "API returned non-JSON (status " + res.status + "). " +
-            "Use http://127.0.0.1:8000/ (not a saved report.html file)."
+            "Reload from " + window.location.origin + "/ (not a saved report.html file)."
           );
         }}
         if (!res.ok) throw new Error(formatErrorDetail(data.detail));
+        removeThinking();
         const suffix = data.source ? " [" + data.source + "]" : "";
         addMessage("assistant", data.reply, true);
-        setStatus("Done" + suffix + (data.record_count ? " · " + data.record_count + " records" : ""));
+        setStatus("Done" + suffix + (data.record_count ? " · " + data.record_count + " records" : ""), false);
       }} catch (err) {{
-        const msg = err.name === "AbortError"
-          ? "Timed out in browser after " + Math.round(clientTimeoutMs / 1000) + "s. " +
-            "Increase CHAT_TIMEOUT in .env or try a simpler question."
-          : err.message;
-        addMessage("assistant", "Error: " + msg, false);
-        setStatus("");
+        removeThinking();
+        addMessage("assistant", "Error: " + formatFetchError(err), false);
+        setStatus("", false);
       }} finally {{
         clearTimeout(timer);
         sendBtn.disabled = false;
+        sendBtn.classList.remove("loading");
+        sendBtn.textContent = "Send";
         input.focus();
       }}
     }});
