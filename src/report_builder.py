@@ -53,6 +53,8 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="chat-timeout-seconds" content="{config.CHAT_TIMEOUT}" />
+  <meta name="api-base-url" content="{api_base}" />
   <title>Tree Complaint Analysis Report</title>
   <style>
     :root {{
@@ -151,6 +153,21 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
       font-weight: 600;
     }}
     .chat-input button:disabled {{ opacity: 0.6; cursor: not-allowed; }}
+    .chat-status {{
+      padding: 0 1rem 0.5rem;
+      font-size: 0.85rem;
+      color: var(--muted);
+      min-height: 1.25rem;
+    }}
+    .file-warning {{
+      background: #fef3c7;
+      color: #92400e;
+      padding: 0.75rem 1rem;
+      margin: 0 1rem 0.5rem;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      display: none;
+    }}
     @media (max-width: 900px) {{
       .layout {{ grid-template-columns: 1fr; }}
       .sidebar {{ height: 50vh; position: static; }}
@@ -170,6 +187,8 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
     </main>
     <aside class="sidebar">
       <div class="chat-header">Chat with AI Analyst</div>
+      <div id="file-warning" class="file-warning"></div>
+      <div id="chat-status" class="chat-status"></div>
       <div id="chat-messages" class="chat-messages"></div>
       <form id="chat-form" class="chat-input">
         <input id="chat-input" type="text" placeholder="e.g. Which district has the most severe cases?" autocomplete="off" />
@@ -178,14 +197,44 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
     </aside>
   </div>
   <script>
+    const configuredApiBase = document.querySelector('meta[name="api-base-url"]')?.content
+      || "{api_base}";
+    const chatTimeoutSec = parseInt(
+      document.querySelector('meta[name="chat-timeout-seconds"]')?.content || "300",
+      10
+    );
+    const clientTimeoutMs = (chatTimeoutSec + 120) * 1000;
+
     const API_BASE = (() => {{
-      const configured = "{api_base}";
-      // Same-origin when served by FastAPI (e.g. :8000)
+      if (window.location.protocol === "file:") {{
+        return configuredApiBase;
+      }}
       if (window.location.port === "8000") {{
         return window.location.origin;
       }}
-      return configured;
+      return configuredApiBase;
     }})();
+
+    const statusEl = document.getElementById("chat-status");
+    const fileWarning = document.getElementById("file-warning");
+
+    if (window.location.protocol === "file:") {{
+      fileWarning.style.display = "block";
+      fileWarning.innerHTML =
+        "Opened as a local file — chat will not work. Use " +
+        '<a href="' + configuredApiBase + '/" target="_blank" rel="noopener">' +
+        configuredApiBase + "/</a> in your browser instead.";
+    }}
+
+    function setStatus(text) {{
+      statusEl.textContent = text || "";
+    }}
+
+    function formatErrorDetail(detail) {{
+      if (!detail) return "Request failed";
+      if (typeof detail === "string") return detail;
+      return JSON.stringify(detail);
+    }}
 
     const form = document.getElementById("chat-form");
     const input = document.getElementById("chat-input");
@@ -268,12 +317,20 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
       addMessage("user", text, false);
       input.value = "";
       sendBtn.disabled = true;
+      setStatus(
+        "Refreshing data and waiting for Ollama (may take several minutes on CPU)..."
+      );
+
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), clientTimeoutMs);
 
       try {{
         const res = await fetch(API_BASE + "/api/chat", {{
           method: "POST",
           headers: {{ "Content-Type": "application/json" }},
           body: JSON.stringify({{ message: text }}),
+          credentials: "omit",
+          signal: controller.signal,
         }});
         const raw = await res.text();
         let data;
@@ -282,14 +339,22 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
         }} catch {{
           throw new Error(
             "API returned non-JSON (status " + res.status + "). " +
-            "Open via FastAPI at http://127.0.0.1:8000 or set API_BASE_URL in .env"
+            "Use http://127.0.0.1:8000/ (not a saved report.html file)."
           );
         }}
-        if (!res.ok) throw new Error(data.detail || "Request failed");
+        if (!res.ok) throw new Error(formatErrorDetail(data.detail));
+        const suffix = data.source ? " [" + data.source + "]" : "";
         addMessage("assistant", data.reply, true);
+        setStatus("Done" + suffix + (data.record_count ? " · " + data.record_count + " records" : ""));
       }} catch (err) {{
-        addMessage("assistant", "Error: " + err.message, false);
+        const msg = err.name === "AbortError"
+          ? "Timed out in browser after " + Math.round(clientTimeoutMs / 1000) + "s. " +
+            "Increase CHAT_TIMEOUT in .env or try a simpler question."
+          : err.message;
+        addMessage("assistant", "Error: " + msg, false);
+        setStatus("");
       }} finally {{
+        clearTimeout(timer);
         sendBtn.disabled = false;
         input.focus();
       }}

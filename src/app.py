@@ -134,6 +134,16 @@ def ollama_health() -> dict[str, Any]:
     return deepseek.check_ollama_health()
 
 
+@app.get("/api/config")
+def api_config() -> dict[str, Any]:
+    return {
+        "api_base_url": config.API_BASE_URL,
+        "chat_timeout_seconds": config.CHAT_TIMEOUT,
+        "chat_model": config.CHAT_MODEL,
+        "ollama_base_url": config.OLLAMA_BASE_URL,
+    }
+
+
 @app.get("/api/summary")
 def get_summary() -> dict[str, Any]:
     try:
@@ -144,7 +154,7 @@ def get_summary() -> dict[str, Any]:
 
 
 @app.post("/api/chat")
-def chat(request: ChatRequest) -> dict[str, str]:
+def chat(request: ChatRequest) -> dict[str, Any]:
     message = request.message.strip()
     if not message:
         raise HTTPException(status_code=400, detail="Message cannot be empty")
