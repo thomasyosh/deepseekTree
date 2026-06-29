@@ -163,6 +163,23 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
       font-weight: 600;
     }}
     .chat-input button:disabled {{ opacity: 0.6; cursor: not-allowed; }}
+    .chat-actions {{
+      padding: 0 1rem 1rem;
+      border-top: 1px solid var(--border);
+    }}
+    .chat-actions button {{
+      width: 100%;
+      padding: 0.65rem 1rem;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #fff;
+      color: var(--text);
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+    }}
+    .chat-actions button:hover {{ background: #f9fafb; }}
+    .chat-actions button:disabled {{ opacity: 0.5; cursor: not-allowed; }}
     .chat-input button.loading::after {{
       content: "…";
       animation: dots 1.2s steps(4, end) infinite;
@@ -255,6 +272,11 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
         <input id="chat-input" type="text" placeholder="{chat_placeholder}" autocomplete="off" />
         <button type="submit" id="chat-send">Send</button>
       </form>
+      <div class="chat-actions">
+        <button type="button" id="chat-download" title="Download this chat as HTML">
+          Download chat report
+        </button>
+      </div>
     </aside>
   </div>
   <script type="application/json" id="chat-welcome-data">{chat_welcome_json}</script>
@@ -558,6 +580,7 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
     const form = document.getElementById("chat-form");
     const input = document.getElementById("chat-input");
     const sendBtn = document.getElementById("chat-send");
+    const downloadBtn = document.getElementById("chat-download");
     const messages = document.getElementById("chat-messages");
     const CHAT_STORAGE_KEY = "deepseektree_chat_history";
 
@@ -684,6 +707,59 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
         input.focus();
       }}
     }});
+
+    function parseDownloadFilename(header) {{
+      if (!header) return null;
+      const match = /filename=\"?([^\";]+)\"?/i.exec(header);
+      return match ? match[1] : null;
+    }}
+
+    async function downloadChatReport() {{
+      const userMsgs = storedMessages.filter((m) => m.role === "user");
+      if (userMsgs.length === 0) {{
+        setStatus("Ask at least one question before downloading.", false);
+        return;
+      }}
+
+      const url = apiUrl("/api/chat/export");
+      if (!url) {{
+        setStatus("Download requires the report opened via " + apiBase + "/", false);
+        return;
+      }}
+
+      downloadBtn.disabled = true;
+      setStatus("Preparing chat report download...", true);
+      try {{
+        const res = await fetchWithTimeout(
+          url,
+          fetchOptions("POST", {{ messages: storedMessages }}),
+          60000
+        );
+        if (!res.ok) {{
+          const err = await res.json().catch(() => ({{}}));
+          throw new Error(formatErrorDetail(err.detail) || "Export failed (HTTP " + res.status + ")");
+        }}
+        const blob = await res.blob();
+        const filename =
+          parseDownloadFilename(res.headers.get("Content-Disposition")) ||
+          ("tree-chat-report-" + new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-") + ".html");
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(link.href);
+        setStatus("Downloaded " + filename, false);
+      }} catch (err) {{
+        setStatus("", false);
+        addMessage("assistant", "Error: Could not download report — " + err.message, false);
+      }} finally {{
+        downloadBtn.disabled = false;
+      }}
+    }}
+
+    downloadBtn?.addEventListener("click", downloadChatReport);
   </script>
 </body>
 </html>

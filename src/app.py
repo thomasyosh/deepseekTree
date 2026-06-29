@@ -1,14 +1,16 @@
 import json
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from typing import Any
 
 import requests
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, HTMLResponse
-from pydantic import BaseModel
+from fastapi.responses import FileResponse, HTMLResponse, Response
+from pydantic import BaseModel, ConfigDict, Field
 
 import config
 import chat_log
+import chat_export
 import deepseek
 import filelogger
 import llm_client
@@ -76,6 +78,19 @@ _cached_summary: dict[str, Any] | None = None
 class ChatRequest(BaseModel):
     message: str
     refresh_data: bool | None = None
+
+
+class ChatExportMessage(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    role: str
+    text: str
+    is_html: bool = Field(False, alias="isHtml")
+
+
+class ChatExportRequest(BaseModel):
+    messages: list[ChatExportMessage]
+    title: str | None = None
 
 
 def _refresh_dataset_or_raise() -> None:
@@ -332,6 +347,38 @@ def chat(request: ChatRequest) -> dict[str, Any]:
     except Exception as e:
         filelogger.logger.error(f"Chat error: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.post("/api/chat/export")
+def export_chat_report(request: ChatExportRequest) -> Response:
+    """Build a downloadable HTML report from the user's chat session."""
+    if not any(m.role == "user" for m in request.messages):
+        raise HTTPException(
+            status_code=400,
+            detail="No user messages to export. Ask at least one question first.",
+        )
+
+    try:
+        _, summary = _load_dataset()
+    except (FileNotFoundError, ValueError) as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+
+    payload = [
+        {"role": m.role, "text": m.text, "isHtml": m.is_html}
+        for m in request.messages
+    ]
+    html_content = chat_export.build_chat_export_html(
+        payload,
+        summary,
+        title=request.title,
+    )
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    filename = f"tree-chat-report-{stamp}.html"
+    return Response(
+        content=html_content,
+        media_type="text/html; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.post("/api/refresh")
