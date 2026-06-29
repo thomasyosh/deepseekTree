@@ -3,5 +3,6 @@ src/__pycache__/config.cpython-311.pyc
 .env
 data.json
 report.html
+chat_log.jsonl
 docker/certs/*.crt
 docker/certs/*.pem

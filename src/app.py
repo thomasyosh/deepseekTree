@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 
 import config
+import chat_log
 import deepseek
 import filelogger
 import llm_client
@@ -96,10 +97,15 @@ def _load_dataset() -> tuple[list[dict[str, Any]], dict[str, Any]]:
     return rows, _cached_summary
 
 
-def _invalidate_cache() -> None:
-    global _cached_rows, _cached_summary, _chat_history
+def _invalidate_data_cache() -> None:
+    global _cached_rows, _cached_summary
     _cached_rows = None
     _cached_summary = None
+
+
+def _invalidate_cache() -> None:
+    global _chat_history
+    _invalidate_data_cache()
     _chat_history = []
 
 
@@ -144,24 +150,29 @@ def chat(request: ChatRequest) -> dict[str, str]:
         raise HTTPException(status_code=400, detail="Message cannot be empty")
 
     try:
-        if not pipeline.refresh_dataset(
-            generate_report=True,
-            report_use_llm=config.REFRESH_REPORT_ON_CHAT,
-        ):
+        if not pipeline.refresh_dataset(generate_report=False):
+            chat_log.log_chat(message, error="data refresh failed")
             raise HTTPException(
                 status_code=503,
                 detail="Could not refresh data from ENDPOINT. Check ENDPOINT, API_KEY, and logs.",
             )
-        _invalidate_cache()
+        _invalidate_data_cache()
         rows, summary = _load_dataset()
 
         local_reply = try_answer_locally(message, rows, summary)
         if local_reply:
             _chat_history.append({"role": "user", "content": message})
             _chat_history.append({"role": "assistant", "content": local_reply})
+            chat_log.log_chat(
+                message,
+                reply=local_reply,
+                source="local",
+                record_count=len(rows),
+            )
             return {
                 "reply": local_reply,
                 "source": "local",
+                "question": message,
                 "data_refreshed": True,
                 "record_count": len(rows),
                 "report_url": "/report.html" if config.REPORT_PATH.exists() else None,
@@ -228,9 +239,16 @@ def chat(request: ChatRequest) -> dict[str, str]:
 
         _chat_history.append({"role": "user", "content": message})
         _chat_history.append({"role": "assistant", "content": reply})
+        chat_log.log_chat(
+            message,
+            reply=reply,
+            source=source,
+            record_count=len(rows),
+        )
         return {
             "reply": reply,
             "source": source,
+            "question": message,
             "data_refreshed": True,
             "record_count": len(rows),
             "report_url": "/report.html" if config.REPORT_PATH.exists() else None,

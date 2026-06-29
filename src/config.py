@@ -48,6 +48,7 @@ NO_PROXY: dict[str, None] = {"http": None, "https": None}
 
 DATA_PATH = ROOT / "data.json"
 REPORT_PATH = ROOT / "report.html"
+CHAT_LOG_PATH = ROOT / "chat_log.jsonl"
 
 ENDPOINT = os.getenv("ENDPOINT")
 API_KEY = os.getenv("API_KEY")

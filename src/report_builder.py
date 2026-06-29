@@ -122,6 +122,12 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
     }}
     .msg.user {{ background: #dbeafe; align-self: flex-end; }}
     .msg.assistant {{ background: #f3f4f6; align-self: flex-start; }}
+    .msg-label {{
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--muted);
+      margin-bottom: 0.25rem;
+    }}
     .chat-input {{
       display: flex;
       gap: 0.5rem;
@@ -164,9 +170,7 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
     </main>
     <aside class="sidebar">
       <div class="chat-header">Chat with AI Analyst</div>
-      <div id="chat-messages" class="chat-messages">
-        <div class="msg assistant">Ask questions about districts, severity, status, or trends in this dataset.</div>
-      </div>
+      <div id="chat-messages" class="chat-messages"></div>
       <form id="chat-form" class="chat-input">
         <input id="chat-input" type="text" placeholder="e.g. Which district has the most severe cases?" autocomplete="off" />
         <button type="submit" id="chat-send">Send</button>
@@ -187,16 +191,72 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
     const input = document.getElementById("chat-input");
     const sendBtn = document.getElementById("chat-send");
     const messages = document.getElementById("chat-messages");
+    const CHAT_STORAGE_KEY = "deepseektree_chat_history";
+
+    function loadStoredMessages() {{
+      try {{
+        const raw = sessionStorage.getItem(CHAT_STORAGE_KEY);
+        return raw ? JSON.parse(raw) : [];
+      }} catch {{
+        return [];
+      }}
+    }}
+
+    function saveStoredMessages(items) {{
+      try {{
+        sessionStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(items));
+      }} catch (err) {{
+        console.warn("Could not save chat history", err);
+      }}
+    }}
+
+    let storedMessages = loadStoredMessages();
 
     function addMessage(role, text, isHtml) {{
       const el = document.createElement("div");
       el.className = "msg " + role;
+      const label = document.createElement("div");
+      label.className = "msg-label";
+      label.textContent = role === "user" ? "You" : "Assistant";
+      el.appendChild(label);
+      const body = document.createElement("div");
       if (isHtml) {{
-        el.innerHTML = text;
+        body.innerHTML = text;
       }} else {{
-        el.textContent = text;
+        body.textContent = text;
       }}
+      el.appendChild(body);
       messages.appendChild(el);
+      messages.scrollTop = messages.scrollHeight;
+      storedMessages.push({{ role, text, isHtml: !!isHtml }});
+      saveStoredMessages(storedMessages);
+    }}
+
+    if (storedMessages.length === 0) {{
+      addMessage(
+        "assistant",
+        "Ask questions about districts, severity, status, or trends in this dataset.",
+        false
+      );
+      storedMessages = loadStoredMessages();
+    }} else {{
+      messages.innerHTML = "";
+      storedMessages.forEach((item) => {{
+        const el = document.createElement("div");
+        el.className = "msg " + item.role;
+        const label = document.createElement("div");
+        label.className = "msg-label";
+        label.textContent = item.role === "user" ? "You" : "Assistant";
+        el.appendChild(label);
+        const body = document.createElement("div");
+        if (item.isHtml) {{
+          body.innerHTML = item.text;
+        }} else {{
+          body.textContent = item.text;
+        }}
+        el.appendChild(body);
+        messages.appendChild(el);
+      }});
       messages.scrollTop = messages.scrollHeight;
     }}
 
