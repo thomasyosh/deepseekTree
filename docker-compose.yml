@@ -77,6 +77,8 @@ services:
       NO_PROXY: "*"
       no_proxy: "*"
       OLLAMA_URL: http://ollama:11434/v1/chat/completions
+      OLLAMA_OPENAI_BASE_URL: http://ollama:11434/v1
+      LLM_PROVIDER: ollama
       AI_MODEL: deepseek-r1:7b
       CHAT_MODEL: deepseek-r1:7b
       REPORT_MODEL: deepseek-r1:7b

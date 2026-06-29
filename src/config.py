@@ -53,17 +53,29 @@ ENDPOINT = os.getenv("ENDPOINT")
 API_KEY = os.getenv("API_KEY")
 PROXY = os.getenv("PROXY")
 VERIFY_SSL = _env_bool("VERIFY_SSL", default=True)
+
+# LLM: local DeepSeek via Ollama's OpenAI-compatible /v1 API (default).
+# Set LLM_PROVIDER=cloud only for OpenAI's hosted API.
+LLM_PROVIDER = (os.getenv("LLM_PROVIDER") or "ollama").strip().lower()
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL")
+
 AI_MODEL = os.getenv("AI_MODEL", "deepseek-r1:7b")
 CHAT_MODEL = os.getenv("CHAT_MODEL") or AI_MODEL
 REPORT_MODEL = os.getenv("REPORT_MODEL") or AI_MODEL
+
 OLLAMA_URL = os.getenv(
     "OLLAMA_URL", "http://127.0.0.1:11434/v1/chat/completions"
 ).replace("://localhost", "://127.0.0.1")
+OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY", "ollama")
 
 _ollama_parts = urlparse(OLLAMA_URL)
 OLLAMA_HOST = (_ollama_parts.hostname or "127.0.0.1").replace("localhost", "127.0.0.1")
 OLLAMA_PORT = _ollama_parts.port or 11434
 OLLAMA_PATH = _ollama_parts.path or "/v1/chat/completions"
+OLLAMA_OPENAI_BASE_URL = (
+    os.getenv("OLLAMA_OPENAI_BASE_URL") or f"http://{OLLAMA_HOST}:{OLLAMA_PORT}/v1"
+).replace("://localhost", "://127.0.0.1")
 OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "180"))
 OLLAMA_NUM_CTX = int(os.getenv("OLLAMA_NUM_CTX", "2048"))
 CHAT_TIMEOUT = int(os.getenv("CHAT_TIMEOUT", "60"))

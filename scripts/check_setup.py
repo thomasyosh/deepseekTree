@@ -11,6 +11,7 @@ import os  # noqa: E402
 
 import config  # noqa: E402
 import deepseek  # noqa: E402
+import llm_client  # noqa: E402
 import main as pipeline  # noqa: E402
 
 
@@ -19,17 +20,20 @@ def main() -> int:
 
     print(f"ENDPOINT set: {bool(config.ENDPOINT)}")
     print(f"OLLAMA_URL:   {config.OLLAMA_URL}")
+    print(f"LLM_PROVIDER: {config.LLM_PROVIDER}")
     print(f"CHAT_MODEL:   {config.CHAT_MODEL}")
     print(f"HTTP_PROXY:   {os.environ.get('HTTP_PROXY') or os.environ.get('http_proxy') or '(not set)'}")
     print(f"NO_PROXY:     {os.environ.get('NO_PROXY') or os.environ.get('no_proxy') or '(not set)'}")
     print()
 
-    health = deepseek.check_ollama_health()
+    health = llm_client.check_llm_health()
+    label = "Local DeepSeek (Ollama)" if config.LLM_PROVIDER == "ollama" else "OpenAI cloud"
     if health["ok"]:
-        print("Ollama: OK")
-        print(f"  Models: {', '.join(health['models_available']) or '(none)'}")
+        print(f"{label}: OK")
+        if config.LLM_PROVIDER == "ollama":
+            print(f"  Models: {', '.join(health.get('models_available', [])) or '(none)'}")
     else:
-        print(f"Ollama: FAILED — {health['error']}")
+        print(f"{label}: FAILED — {health.get('error')}")
     for hint in health["hints"]:
         print(f"  → {hint}")
     print()
@@ -49,7 +53,7 @@ def main() -> int:
         print("  uvicorn app:app --app-dir src --reload --host 127.0.0.1 --port 8000")
         return 0
 
-    print("Fix Ollama first, then re-run: python scripts/check_setup.py")
+    print("Fix LLM setup, then re-run: python scripts/check_setup.py")
     return 1
 
 

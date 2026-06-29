@@ -10,6 +10,7 @@ from pydantic import BaseModel
 import config
 import deepseek
 import filelogger
+import llm_client
 import main as pipeline
 from query_engine import try_answer_locally
 from summary import build_summary
@@ -17,26 +18,35 @@ from fastapi.middleware.cors import CORSMiddleware
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    filelogger.logger.info("Startup: ensuring dataset is available")
+    filelogger.logger.info(
+        f"Startup: LLM_PROVIDER={config.LLM_PROVIDER}, ensuring dataset is available"
+    )
     pipeline.ensure_dataset(generate_report=True)
 
-    health = deepseek.check_ollama_health()
+    health = llm_client.check_llm_health()
     if health["ok"]:
-        filelogger.logger.info(
-            f"Ollama OK at {health['host']}:{health['port']} "
-            f"(models: {', '.join(health['models_available']) or 'none'})"
-        )
-        for hint in health["hints"]:
-            filelogger.logger.warning(f"Ollama: {hint}")
+        if config.LLM_PROVIDER == "ollama":
+            filelogger.logger.info(
+                f"Local DeepSeek OK via OpenAI API @ {config.OLLAMA_OPENAI_BASE_URL} "
+                f"(models: {', '.join(health.get('models_available', [])) or 'none'})"
+            )
+        for hint in health.get("hints", []):
+            filelogger.logger.warning(f"LLM: {hint}")
     else:
         filelogger.logger.error(
-            f"Ollama NOT reachable at {health['host']}:{health['port']}: {health['error']}"
+            f"LLM NOT ready ({config.LLM_PROVIDER}): {health.get('error')}"
         )
-        for hint in health["hints"]:
+        for hint in health.get("hints", []):
             filelogger.logger.error(f"  → {hint}")
-        filelogger.logger.error(
-            "  → Diagnostics: http://127.0.0.1:8000/api/ollama-health"
-        )
+        if config.LLM_PROVIDER == "cloud":
+            filelogger.logger.error(
+                "  → Or set LLM_PROVIDER=ollama for local DeepSeek via Ollama"
+            )
+        else:
+            filelogger.logger.error(
+                "  → Ensure Ollama is running and deepseek-r1:7b is pulled"
+            )
+        filelogger.logger.error("  → Diagnostics: http://127.0.0.1:8000/api/llm-health")
 
     yield
 
@@ -108,9 +118,15 @@ def index() -> HTMLResponse:
     )
 
 
+@app.get("/api/llm-health")
+def llm_health() -> dict[str, Any]:
+    """LLM diagnostics (OpenAI or Ollama depending on LLM_PROVIDER)."""
+    return llm_client.check_llm_health()
+
+
 @app.get("/api/ollama-health")
 def ollama_health() -> dict[str, Any]:
-    """Diagnostics for colleagues — open in browser or API tester."""
+    """Ollama-only diagnostics (legacy endpoint)."""
     return deepseek.check_ollama_health()
 
 
@@ -142,7 +158,7 @@ def chat(request: ChatRequest) -> dict[str, str]:
             summary, _chat_history, message, rows=rows
         )
         try:
-            reply = deepseek.chat_completion(
+            reply = llm_client.chat_completion(
                 messages,
                 model=config.CHAT_MODEL,
                 max_tokens=config.CHAT_MAX_TOKENS,
@@ -155,10 +171,8 @@ def chat(request: ChatRequest) -> dict[str, str]:
                 f"(model={config.CHAT_MODEL})"
             )
             reply = (
-                "<p><strong>AI timed out.</strong> Try a faster model:</p>"
-                "<pre>ollama pull deepseek-r1:7b</pre>"
-                "<p>Then set <code>CHAT_MODEL=deepseek-r1:7b</code> in .env "
-                "and restart the server.</p>"
+                "<p><strong>AI timed out.</strong> Try a faster model "
+                f"(current: <code>{config.CHAT_MODEL}</code>).</p>"
                 "<p>For ranking questions (e.g. top 5 serious areas), "
                 "answers are returned instantly without AI.</p>"
             )
@@ -166,36 +180,31 @@ def chat(request: ChatRequest) -> dict[str, str]:
         except requests.exceptions.HTTPError as e:
             status = e.response.status_code if e.response is not None else None
             filelogger.logger.error(f"Chat request failed: {e}")
-            if status == 403:
+            if config.LLM_PROVIDER == "ollama" and status == 403:
                 reply = (
                     "<p><strong>Ollama returned 403 Forbidden.</strong></p>"
-                    "<p>On company networks this usually means the request was "
-                    "sent through the corporate proxy instead of directly to "
-                    "Ollama on your machine.</p>"
-                    "<p>Ensure Ollama is running, set "
-                    "<code>OLLAMA_URL=http://127.0.0.1:11434/v1/chat/completions</code> "
-                    "in .env, restart the server, and test:</p>"
-                    "<pre>curl.exe http://127.0.0.1:11434/api/tags</pre>"
+                    "<p>Check Ollama is running and "
+                    "<code>OLLAMA_OPENAI_BASE_URL=http://127.0.0.1:11434/v1</code> "
+                    "in .env.</p>"
                     f"<p><em>{e}</em></p>"
                 )
-            elif status == 500 and "killed" in str(e).lower():
+            elif config.LLM_PROVIDER == "ollama" and status == 500 and "killed" in str(e).lower():
                 reply = (
                     "<p><strong>Ollama ran out of memory.</strong></p>"
-                    "<p><code>llama-server … signal: killed</code> usually means "
-                    "the model process was stopped by the OS (OOM).</p>"
-                    "<ul>"
-                    "<li>Docker Desktop → Settings → Resources → Memory: use at least 8 GB</li>"
-                    "<li>Use <code>deepseek-r1:7b</code> (not 14b) unless you have 16+ GB RAM</li>"
-                    "<li>Lower <code>OLLAMA_NUM_CTX=2048</code> in .env</li>"
-                    "</ul>"
+                    "<p>Use <code>deepseek-r1:7b</code> and "
+                    "<code>OLLAMA_NUM_CTX=2048</code> in .env.</p>"
                     f"<p><em>{e}</em></p>"
                 )
             else:
-                reply = deepseek.ollama_troubleshooting_html(e)
+                reply = llm_client.llm_troubleshooting_html(e)
             source = "error"
         except requests.exceptions.RequestException as e:
             filelogger.logger.error(f"Chat request failed: {e}")
-            reply = deepseek.ollama_troubleshooting_html(e)
+            reply = llm_client.llm_troubleshooting_html(e)
+            source = "error"
+        except Exception as e:
+            filelogger.logger.error(f"Chat request failed: {e}")
+            reply = llm_client.llm_troubleshooting_html(e)
             source = "error"
 
         _chat_history.append({"role": "user", "content": message})

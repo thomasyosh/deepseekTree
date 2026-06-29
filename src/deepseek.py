@@ -9,6 +9,7 @@ import requests
 
 import config
 import filelogger
+import llm_client
 from prompts import CHAT_SYSTEM_PROMPT, REPORT_SYSTEM_PROMPT, build_chat_user_prompt
 from query_engine import build_llm_prompt, detect_intent, execute_query
 from report_builder import build_report_html
@@ -214,7 +215,7 @@ def _ollama_not_running_hints_html() -> list[str]:
     ]
 
 
-def chat_completion(
+def _ollama_chat_completion(
     messages: list[dict[str, str]],
     *,
     model: str | None = None,
@@ -303,14 +304,14 @@ def analyze(data_path: Path | None = None, report_path: Path | None = None) -> P
         "<p><em>AI analysis unavailable. Review the summary tables above.</em></p>"
     )
     try:
-        narrative = chat_completion(
+        narrative = llm_client.chat_completion(
             build_analysis_messages(summary),
             model=config.REPORT_MODEL,
             max_tokens=1200,
             timeout=config.OLLAMA_TIMEOUT,
         )
     except requests.exceptions.RequestException as e:
-        filelogger.logger.error(f"Ollama analysis failed: {e}")
+        filelogger.logger.error(f"LLM analysis failed: {e}")
     html = build_report_html(summary, narrative)
     report_path.write_text(html, encoding="utf-8")
     filelogger.logger.info(f"Report written to {report_path}")
