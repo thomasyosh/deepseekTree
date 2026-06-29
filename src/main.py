@@ -8,12 +8,6 @@ import deepseek
 import filelogger
 
 
-def _parse_proxy(proxy_value: str | None) -> dict[str, str] | None:
-    if not proxy_value:
-        return None
-    return {"http": proxy_value, "https": proxy_value}
-
-
 def fetch_data(data_path: Path | None = None) -> bool:
     """Fetch JSON from the configured endpoint and save to data.json."""
     data_path = data_path or config.DATA_PATH
@@ -26,7 +20,7 @@ def fetch_data(data_path: Path | None = None) -> bool:
     if config.API_KEY:
         headers["apikey"] = config.API_KEY
 
-    proxies = _parse_proxy(config.PROXY)
+    proxies = config.parse_proxy(config.PROXY)
 
     try:
         filelogger.logger.info(f"Sending GET request to {config.ENDPOINT}")

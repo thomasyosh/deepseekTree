@@ -31,7 +31,10 @@ def chat_completion(
     request_timeout = timeout or config.OLLAMA_TIMEOUT
     filelogger.logger.info(f"Calling Ollama model={model_name}")
     response = requests.post(
-        config.OLLAMA_URL, json=payload, timeout=request_timeout
+        config.OLLAMA_URL,
+        json=payload,
+        timeout=request_timeout,
+        proxies=config.NO_PROXY,
     )
     response.raise_for_status()
     data = response.json()

@@ -6,6 +6,32 @@ from dotenv import load_dotenv
 ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT / ".env")
 
+_LOCALHOST_NO_PROXY = ("localhost", "127.0.0.1", "[::1]")
+
+
+def _ensure_localhost_bypasses_proxy() -> None:
+    """Keep local Ollama calls off the corporate proxy."""
+    existing = os.getenv("NO_PROXY") or os.getenv("no_proxy") or ""
+    hosts = {h.strip() for h in existing.split(",") if h.strip()}
+    if set(_LOCALHOST_NO_PROXY).issubset(hosts):
+        return
+    merged = ",".join(sorted(hosts | set(_LOCALHOST_NO_PROXY)))
+    os.environ["NO_PROXY"] = merged
+    os.environ["no_proxy"] = merged
+
+
+_ensure_localhost_bypasses_proxy()
+
+
+def parse_proxy(proxy_value: str | None) -> dict[str, str] | None:
+    if not proxy_value:
+        return None
+    return {"http": proxy_value, "https": proxy_value}
+
+
+# Explicitly disable proxy for local services (e.g. Ollama on localhost).
+NO_PROXY: dict[str, None] = {"http": None, "https": None}
+
 DATA_PATH = ROOT / "data.json"
 REPORT_PATH = ROOT / "report.html"
 
