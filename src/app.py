@@ -77,6 +77,25 @@ class ChatRequest(BaseModel):
     message: str
 
 
+def _chat_response(
+    *,
+    reply: str,
+    source: str,
+    message: str,
+    rows: list[dict[str, Any]],
+    summary: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "reply": reply,
+        "source": source,
+        "question": message,
+        "data_refreshed": True,
+        "record_count": len(rows),
+        "summary": summary,
+        "report_url": "/report.html" if config.REPORT_PATH.exists() else None,
+    }
+
+
 def _load_dataset() -> tuple[list[dict[str, Any]], dict[str, Any]]:
     global _cached_rows, _cached_summary
 
@@ -185,14 +204,13 @@ def chat(request: ChatRequest) -> dict[str, Any]:
                 source="local",
                 record_count=len(rows),
             )
-            return {
-                "reply": local_reply,
-                "source": "local",
-                "question": message,
-                "data_refreshed": True,
-                "record_count": len(rows),
-                "report_url": "/report.html" if config.REPORT_PATH.exists() else None,
-            }
+            return _chat_response(
+                reply=local_reply,
+                source="local",
+                message=message,
+                rows=rows,
+                summary=summary,
+            )
 
         messages = deepseek.build_chat_messages(
             summary, _chat_history, message, rows=rows
@@ -261,14 +279,13 @@ def chat(request: ChatRequest) -> dict[str, Any]:
             source=source,
             record_count=len(rows),
         )
-        return {
-            "reply": reply,
-            "source": source,
-            "question": message,
-            "data_refreshed": True,
-            "record_count": len(rows),
-            "report_url": "/report.html" if config.REPORT_PATH.exists() else None,
-        }
+        return _chat_response(
+            reply=reply,
+            source=source,
+            message=message,
+            rows=rows,
+            summary=summary,
+        )
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except Exception as e:

@@ -4,6 +4,14 @@ from typing import Any
 
 import config
 
+TABLE_SECTIONS: list[tuple[str, str]] = [
+    ("by_district", "Cases by District"),
+    ("by_status", "Cases by Status"),
+    ("by_severity", "Cases by Severity"),
+    ("by_complaint_type", "Cases by Complaint Type"),
+    ("by_contractor", "Cases by Contractor"),
+]
+
 
 def _table(title: str, data: dict[str, int]) -> str:
     rows = "".join(
@@ -35,18 +43,16 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
 
     tables = "".join(
         _table(title, summary[key])
-        for key, title in [
-            ("by_district", "Cases by District"),
-            ("by_status", "Cases by Status"),
-            ("by_severity", "Cases by Severity"),
-            ("by_complaint_type", "Cases by Complaint Type"),
-            ("by_contractor", "Cases by Contractor"),
-        ]
+        for key, title in TABLE_SECTIONS
         if key in summary
     )
 
     safe_narrative = narrative.strip() or "<p>No narrative generated.</p>"
     api_base = html.escape(config.API_BASE_URL)
+    table_sections_json = html.escape(
+        json.dumps([{"key": k, "title": t} for k, t in TABLE_SECTIONS]),
+        quote=True,
+    )
 
     return f"""<!DOCTYPE html>
 <html lang="zh-HK">
@@ -55,6 +61,7 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="chat-timeout-seconds" content="{config.CHAT_TIMEOUT}" />
   <meta name="api-base-url" content="{api_base}" />
+  <meta name="report-table-sections" content="{table_sections_json}" />
   <title>Tree Complaint Analysis Report</title>
   <style>
     :root {{
@@ -202,6 +209,21 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
     .live-server-info a {{ color: #1d4ed8; }}
     .conn-ok {{ color: #15803d; }}
     .conn-bad {{ color: #b91c1c; }}
+    .data-updated {{
+      font-size: 0.85rem;
+      color: var(--muted);
+      margin: -0.5rem 0 1rem;
+      min-height: 1.25rem;
+    }}
+    .data-updated.flash {{
+      color: #15803d;
+      font-weight: 500;
+    }}
+    .main-updating {{
+      opacity: 0.65;
+      pointer-events: none;
+      transition: opacity 0.2s;
+    }}
     @media (max-width: 900px) {{
       .layout {{ grid-template-columns: 1fr; }}
       .sidebar {{ height: 50vh; position: static; }}
@@ -210,11 +232,12 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
 </head>
 <body>
   <div class="layout">
-    <main class="main">
+    <main class="main" id="report-main">
       <h1>Tree Complaint Analysis Report</h1>
-      {overview}
-      {tables}
-      <section class="card narrative">
+      <p id="report-data-updated" class="data-updated" aria-live="polite"></p>
+      <div id="report-overview">{overview}</div>
+      <div id="report-tables">{tables}</div>
+      <section class="card narrative" id="report-narrative">
         <h2>AI Analysis</h2>
         {safe_narrative}
       </section>
@@ -318,6 +341,79 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
     }}
 
     checkApiConnection();
+
+    const reportMain = document.getElementById("report-main");
+    const reportOverview = document.getElementById("report-overview");
+    const reportTables = document.getElementById("report-tables");
+    const reportDataUpdated = document.getElementById("report-data-updated");
+    const tableSections = JSON.parse(
+      document.querySelector('meta[name="report-table-sections"]')?.content || "[]"
+    );
+
+    function escapeHtml(text) {{
+      const el = document.createElement("span");
+      el.textContent = text == null ? "" : String(text);
+      return el.innerHTML;
+    }}
+
+    function buildOverviewHtml(summary) {{
+      const dr = summary.date_range || ["—", "—"];
+      return (
+        '<section class="card">' +
+        "<h2>Overview</h2><ul>" +
+        "<li><strong>Total cases:</strong> " + (summary.total_cases || 0) + "</li>" +
+        "<li><strong>Total trees:</strong> " + (summary.total_trees || 0) + "</li>" +
+        "<li><strong>Date range:</strong> " + escapeHtml(dr[0]) + " → " + escapeHtml(dr[1]) + "</li>" +
+        "</ul></section>"
+      );
+    }}
+
+    function buildTableHtml(title, data) {{
+      const rows = Object.entries(data || {{}})
+        .sort((a, b) => b[1] - a[1])
+        .map(([k, v]) => "<tr><td>" + escapeHtml(k) + "</td><td>" + v + "</td></tr>")
+        .join("");
+      return (
+        '<section class="card"><h2>' + escapeHtml(title) + "</h2>" +
+        "<table><thead><tr><th>Category</th><th>Count</th></tr></thead>" +
+        "<tbody>" + rows + "</tbody></table></section>"
+      );
+    }}
+
+    function updateReportPane(summary, recordCount) {{
+      if (!summary || !reportOverview || !reportTables) return;
+      reportOverview.innerHTML = buildOverviewHtml(summary);
+      reportTables.innerHTML = tableSections
+        .filter((s) => summary[s.key])
+        .map((s) => buildTableHtml(s.title, summary[s.key]))
+        .join("");
+      if (reportDataUpdated) {{
+        const n = recordCount != null ? recordCount : summary.total_cases || 0;
+        reportDataUpdated.textContent =
+          "Data updated · " + n + " records · " + new Date().toLocaleTimeString();
+        reportDataUpdated.classList.add("flash");
+        setTimeout(() => reportDataUpdated.classList.remove("flash"), 2500);
+      }}
+    }}
+
+    async function loadLatestSummary() {{
+      const url = apiUrl("/api/summary");
+      if (!url) return;
+      try {{
+        const res = await fetch(url, {{
+          method: "GET",
+          credentials: isFastApiOrigin() ? "same-origin" : "omit",
+          mode: "cors",
+        }});
+        if (!res.ok) return;
+        const summary = await res.json();
+        updateReportPane(summary, summary.total_cases);
+      }} catch (err) {{
+        console.warn("Could not load latest summary for report pane", err);
+      }}
+    }}
+
+    if (!isFilePage) loadLatestSummary();
 
     let thinkingEl = null;
 
@@ -471,6 +567,7 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
       sendBtn.classList.add("loading");
       sendBtn.textContent = "Sending";
       showThinking();
+      reportMain?.classList.add("main-updating");
       setStatus(
         "Request sent — refreshing data, then waiting for Ollama (may take several minutes on CPU).",
         true
@@ -500,6 +597,9 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
         }}
         if (!res.ok) throw new Error(formatErrorDetail(data.detail));
         removeThinking();
+        if (data.summary) {{
+          updateReportPane(data.summary, data.record_count);
+        }}
         const suffix = data.source ? " [" + data.source + "]" : "";
         addMessage("assistant", data.reply, true);
         setStatus("Done" + suffix + (data.record_count ? " · " + data.record_count + " records" : ""), false);
@@ -509,6 +609,7 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
         setStatus("", false);
       }} finally {{
         clearTimeout(timer);
+        reportMain?.classList.remove("main-updating");
         sendBtn.disabled = false;
         sendBtn.classList.remove("loading");
         sendBtn.textContent = "Send";
