@@ -3,3 +3,5 @@ src/__pycache__/config.cpython-311.pyc
 .env
 data.json
 report.html
+docker/certs/*.crt
+docker/certs/*.pem

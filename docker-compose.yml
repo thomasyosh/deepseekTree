@@ -1,19 +1,22 @@
 services:
   ollama:
-    image: ollama/ollama:latest
+    build:
+      context: docker
+      dockerfile: ollama/Dockerfile
+    image: deepseektree-ollama:latest
     container_name: deepseektree-ollama
     volumes:
       - ollama_data:/root/.ollama
     ports:
       - "11434:11434"
-    environment: &no_proxy_env
-      HTTP_PROXY: ""
-      HTTPS_PROXY: ""
-      http_proxy: ""
-      https_proxy: ""
-      ALL_PROXY: ""
-      NO_PROXY: "*"
-      no_proxy: "*"
+    environment:
+      # Registry pulls may need the company proxy; use host.docker.internal on Windows Docker.
+      HTTP_PROXY: ${PROXY:-}
+      HTTPS_PROXY: ${PROXY:-}
+      http_proxy: ${PROXY:-}
+      https_proxy: ${PROXY:-}
+      NO_PROXY: localhost,127.0.0.1,ollama,api
+      no_proxy: localhost,127.0.0.1,ollama,api
     healthcheck:
       test: ["CMD", "ollama", "list"]
       interval: 10s
@@ -21,6 +24,8 @@ services:
       retries: 12
       start_period: 30s
     restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     # Uncomment for NVIDIA GPU (requires nvidia-container-toolkit):
     # deploy:
     #   resources:
@@ -31,13 +36,12 @@ services:
     #           capabilities: [gpu]
 
   init-model:
-    image: ollama/ollama:latest
+    image: deepseektree-ollama:latest
     container_name: deepseektree-init-model
     depends_on:
       ollama:
         condition: service_healthy
     environment:
-      <<: *no_proxy_env
       OLLAMA_HOST: ollama:11434
     entrypoint: ["/bin/sh", "-c"]
     command:
@@ -60,13 +64,18 @@ services:
     env_file:
       - .env
     environment:
-      <<: *no_proxy_env
+      HTTP_PROXY: ""
+      HTTPS_PROXY: ""
+      http_proxy: ""
+      https_proxy: ""
+      ALL_PROXY: ""
+      NO_PROXY: "*"
+      no_proxy: "*"
       OLLAMA_URL: http://ollama:11434/v1/chat/completions
       AI_MODEL: deepseek-r1:7b
       CHAT_MODEL: deepseek-r1:7b
       REPORT_MODEL: deepseek-r1:7b
       API_BASE_URL: http://127.0.0.1:8000
-      PROXY: ""
       VERIFY_SSL: "false"
     depends_on:
       init-model:

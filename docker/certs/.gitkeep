@@ -1,0 +1,3 @@
+# Place your company root CA here as corporate-ca.crt (Base-64 encoded).
+# Export: certmgr.msc → Trusted Root Certification Authorities → your proxy CA → Export
+# Then rebuild: docker compose build ollama
