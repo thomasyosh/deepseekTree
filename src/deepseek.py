@@ -1,4 +1,6 @@
+import http.client
 import json
+import socket
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +13,40 @@ from query_engine import build_llm_prompt, detect_intent, execute_query
 from report_builder import build_report_html
 from summary import build_summary
 
+
+def _ollama_post_json(payload: dict[str, Any], timeout: int) -> dict[str, Any]:
+    """Call Ollama over a raw TCP socket (never goes through HTTP proxy)."""
+    body = json.dumps(payload).encode("utf-8")
+    conn = http.client.HTTPConnection(
+        config.OLLAMA_HOST, config.OLLAMA_PORT, timeout=timeout
+    )
+    try:
+        conn.request(
+            "POST",
+            config.OLLAMA_PATH,
+            body=body,
+            headers={"Content-Type": "application/json"},
+        )
+        resp = conn.getresponse()
+        raw = resp.read()
+        text = raw.decode("utf-8", errors="replace")
+        if resp.status >= 400:
+            fake_response = type(
+                "Resp",
+                (),
+                {"status_code": resp.status, "text": text, "reason": resp.reason},
+            )()
+            raise requests.exceptions.HTTPError(
+                f"{resp.status} Client Error: {resp.reason} for url {config.OLLAMA_URL}",
+                response=fake_response,
+            )
+        return json.loads(text)
+    except (TimeoutError, socket.timeout) as e:
+        raise requests.exceptions.Timeout(str(e)) from e
+    except OSError as e:
+        raise requests.exceptions.ConnectionError(str(e)) from e
+    finally:
+        conn.close()
 
 def chat_completion(
     messages: list[dict[str, str]],
@@ -29,16 +65,12 @@ def chat_completion(
     }
 
     request_timeout = timeout or config.OLLAMA_TIMEOUT
-    filelogger.logger.info(f"Calling Ollama model={model_name}")
-    response = requests.post(
-        config.OLLAMA_URL,
-        json=payload,
-        timeout=request_timeout,
-        proxies=config.NO_PROXY,
+    filelogger.logger.info(
+        f"Calling Ollama model={model_name} "
+        f"host={config.OLLAMA_HOST}:{config.OLLAMA_PORT}{config.OLLAMA_PATH} "
+        f"(direct TCP, no proxy)"
     )
-    response.raise_for_status()
-    data = response.json()
-
+    data = _ollama_post_json(payload, request_timeout)
     if "choices" not in data:
         raise RuntimeError(f"Unexpected Ollama response: {data}")
 

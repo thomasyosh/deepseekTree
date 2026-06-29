@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 
@@ -41,7 +42,14 @@ PROXY = os.getenv("PROXY")
 AI_MODEL = os.getenv("AI_MODEL", "deepseek-r1:7b")
 CHAT_MODEL = os.getenv("CHAT_MODEL") or AI_MODEL
 REPORT_MODEL = os.getenv("REPORT_MODEL") or AI_MODEL
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/v1/chat/completions")
+OLLAMA_URL = os.getenv(
+    "OLLAMA_URL", "http://127.0.0.1:11434/v1/chat/completions"
+).replace("://localhost", "://127.0.0.1")
+
+_ollama_parts = urlparse(OLLAMA_URL)
+OLLAMA_HOST = (_ollama_parts.hostname or "127.0.0.1").replace("localhost", "127.0.0.1")
+OLLAMA_PORT = _ollama_parts.port or 11434
+OLLAMA_PATH = _ollama_parts.path or "/v1/chat/completions"
 OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "180"))
 CHAT_TIMEOUT = int(os.getenv("CHAT_TIMEOUT", "60"))
 CHAT_MAX_TOKENS = int(os.getenv("CHAT_MAX_TOKENS", "256"))

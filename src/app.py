@@ -125,6 +125,28 @@ def chat(request: ChatRequest) -> dict[str, str]:
                 "answers are returned instantly without AI.</p>"
             )
             source = "timeout"
+        except requests.exceptions.HTTPError as e:
+            status = e.response.status_code if e.response is not None else None
+            filelogger.logger.error(f"Chat request failed: {e}")
+            if status == 403:
+                reply = (
+                    "<p><strong>Ollama returned 403 Forbidden.</strong></p>"
+                    "<p>On company networks this usually means the request was "
+                    "sent through the corporate proxy instead of directly to "
+                    "Ollama on your machine.</p>"
+                    "<p>Ensure Ollama is running, set "
+                    "<code>OLLAMA_URL=http://127.0.0.1:11434/v1/chat/completions</code> "
+                    "in .env, restart the server, and test:</p>"
+                    "<pre>curl.exe http://127.0.0.1:11434/api/tags</pre>"
+                    f"<p><em>{e}</em></p>"
+                )
+            else:
+                reply = (
+                    f"<p><strong>Could not reach Ollama.</strong> "
+                    f"Ensure it is running on port 11434.</p>"
+                    f"<p><em>{e}</em></p>"
+                )
+            source = "error"
         except requests.exceptions.RequestException as e:
             filelogger.logger.error(f"Chat request failed: {e}")
             reply = (
