@@ -3,6 +3,7 @@ import json
 from typing import Any
 
 import config
+from prompts import CHAT_EXAMPLE_QUESTIONS, build_chat_welcome_html
 
 TABLE_SECTIONS: list[tuple[str, str]] = [
     ("by_district", "Cases by District"),
@@ -53,6 +54,8 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
         json.dumps([{"key": k, "title": t} for k, t in TABLE_SECTIONS]),
         quote=True,
     )
+    chat_welcome_json = json.dumps(build_chat_welcome_html(), ensure_ascii=False)
+    chat_placeholder = html.escape(CHAT_EXAMPLE_QUESTIONS[0])
 
     return f"""<!DOCTYPE html>
 <html lang="zh-HK">
@@ -249,11 +252,12 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
       <div id="chat-status" class="chat-status"></div>
       <div id="chat-messages" class="chat-messages"></div>
       <form id="chat-form" class="chat-input">
-        <input id="chat-input" type="text" placeholder="e.g. Which district has the most severe cases?" autocomplete="off" />
+        <input id="chat-input" type="text" placeholder="{chat_placeholder}" autocomplete="off" />
         <button type="submit" id="chat-send">Send</button>
       </form>
     </aside>
   </div>
+  <script type="application/json" id="chat-welcome-data">{chat_welcome_json}</script>
   <script>
     const configuredApiBase = document.querySelector('meta[name="api-base-url"]')?.content
       || "{api_base}";
@@ -597,11 +601,11 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
     }}
 
     if (storedMessages.length === 0) {{
-      addMessage(
-        "assistant",
-        "Ask questions about districts, severity, status, or trends in this dataset.",
-        false
-      );
+      const welcomeEl = document.getElementById("chat-welcome-data");
+      const welcomeHtml = welcomeEl
+        ? JSON.parse(welcomeEl.textContent || "\"\"")
+        : "Ask about districts, severity, dates, or totals in this dataset.";
+      addMessage("assistant", welcomeHtml, true);
       storedMessages = loadStoredMessages();
     }} else {{
       messages.innerHTML = "";

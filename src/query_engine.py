@@ -5,7 +5,18 @@ from datetime import date
 from enum import Enum
 from typing import Any
 
-from prompts import build_chat_user_prompt
+from chat_normalize import (
+    fuzzy_match_district,
+    is_probably_in_scope,
+    is_probably_off_topic,
+    is_too_vague,
+    normalize_user_message,
+)
+from prompts import (
+    build_chat_user_prompt,
+    build_chat_welcome_html,
+    build_scope_redirect_html,
+)
 from summary import build_summary
 
 DATE_PATTERN = re.compile(r"(\d{4}-\d{2}-\d{2})")
@@ -16,6 +27,7 @@ class Intent(str, Enum):
     SORT_CASES = "sort_cases"
     FILTER = "filter"
     OVERVIEW = "overview"
+    DATE_EXTREME = "date_extreme"
     UNKNOWN = "generic"
 
 
@@ -28,12 +40,18 @@ def detect_intent(message: str, rows: list[dict[str, Any]] | None = None) -> Int
     if rows and _extract_district(message, rows):
         return Intent.FILTER
 
+    if _is_date_extreme_question(message):
+        return Intent.DATE_EXTREME
+
     if any(t in lower for t in ("overview", "summary", "total", "概覽", "概况", "總數")):
         return Intent.OVERVIEW
 
     if any(
         t in lower or t in message
-        for t in ("newest", "latest", "recent", "oldest", "最新", "最近", "最舊", "排序", "sort", "order")
+        for t in (
+            "newest", "latest", "recent", "oldest", "earliest",
+            "最新", "最近", "最舊", "最早", "排序", "sort", "order",
+        )
     ):
         return Intent.SORT_CASES
 
@@ -71,6 +89,82 @@ def _wants_district(message: str) -> bool:
 def _wants_newest(message: str) -> bool:
     lower = message.lower()
     return any(t in lower or t in message for t in ("newest", "latest", "recent", "最新", "最近"))
+
+
+def _wants_latest_date(message: str) -> bool:
+    lower = message.lower()
+    if any(
+        t in lower or t in message
+        for t in ("latest date", "last date", "most recent date", "newest date", "最新日期", "最晚日期")
+    ):
+        return True
+    if any(t in lower or t in message for t in ("date", "日期", "day")):
+        return any(
+            t in lower or t in message
+            for t in ("latest", "last", "newest", "most recent", "最新", "最遲", "最晚")
+        )
+    return False
+
+
+def _wants_earliest_date(message: str) -> bool:
+    lower = message.lower()
+    if any(
+        t in lower or t in message
+        for t in ("earliest date", "first date", "oldest date", "minimum date", "最早日期", "最先日期")
+    ):
+        return True
+    if any(t in lower or t in message for t in ("date", "日期", "day")):
+        return any(
+            t in lower or t in message
+            for t in ("earliest", "first", "oldest", "minimum", "最早", "最舊", "最先")
+        )
+    return False
+
+
+def _is_date_extreme_question(message: str) -> bool:
+    """Single earliest/latest case_date questions — not multi-case sort lists."""
+    lower = message.lower()
+    if re.search(r"(?:top|前)\s*\d+", message, re.IGNORECASE):
+        return False
+    if re.search(r"\b\d+\s+(?:newest|latest|oldest|earliest)", lower):
+        return False
+
+    if _wants_earliest_date(message) or _wants_latest_date(message):
+        return True
+
+    asks_point_in_time = any(
+        t in lower or t in message
+        for t in (
+            "what is", "what's", "when is", "when was", "which date",
+            "什麼是", "什么是", "何時", "何时", "哪一天", "哪一個", "哪一个",
+        )
+    )
+    has_extreme = any(
+        t in lower or t in message
+        for t in ("earliest", "latest", "first", "last", "oldest", "newest", "最早", "最舊", "最新", "最遲")
+    )
+    return asks_point_in_time and has_extreme
+
+
+def _date_facts(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    if not rows:
+        return {}
+    sorted_rows = sorted(
+        rows,
+        key=lambda r: (r.get("case_date", ""), r.get("case_no", "")),
+    )
+    earliest = sorted_rows[0]
+    latest = sorted_rows[-1]
+    return {
+        "earliest_case_date": earliest.get("case_date"),
+        "earliest_case": {col: earliest.get(col) for col in CASE_COLUMNS},
+        "latest_case_date": latest.get("case_date"),
+        "latest_case": {col: latest.get(col) for col in CASE_COLUMNS},
+        "note": (
+            "Use case_date on individual rows. summary.date_range is only [min, max] — "
+            "always name the case_no for the row that has the earliest/latest case_date."
+        ),
+    }
 
 
 def _extract_date_range(message: str) -> tuple[str | None, str | None]:
@@ -147,11 +241,17 @@ def _with_banner(banner: str, html_out: str) -> str:
 
 
 def _extract_district(message: str, rows: list[dict[str, Any]]) -> str | None:
-    """Match a known district name embedded in the user message."""
-    districts = sorted({r["district"] for r in rows}, key=len, reverse=True)
-    for district in districts:
-        if district in message:
-            return district
+    """Match a known district name embedded in the user message (incl. fuzzy Latin)."""
+    districts = {r["district"] for r in rows}
+    return fuzzy_match_district(message, districts)
+
+
+def try_preflight_reply(message: str) -> str | None:
+    """Fast guidance for greetings, vague prompts, or clearly off-topic questions."""
+    if is_too_vague(message):
+        return build_chat_welcome_html()
+    if is_probably_off_topic(message) and not is_probably_in_scope(message):
+        return build_scope_redirect_html()
     return None
 
 
@@ -220,7 +320,8 @@ def _sort_cases(
     rows: list[dict[str, Any]], message: str, limit: int, district: str | None = None
 ) -> list[dict[str, Any]]:
     reverse = _wants_newest(message) or not any(
-        t in message.lower() or t in message for t in ("oldest", "最舊", "earliest")
+        t in message.lower() or t in message
+        for t in ("oldest", "earliest", "最舊", "最早")
     )
     filtered = list(rows)
     if district:
@@ -249,6 +350,51 @@ def _rank_districts(rows: list[dict[str, Any]], message: str, limit: int) -> lis
         return counts.most_common(limit)
     counts = Counter(r["district"] for r in rows)
     return counts.most_common(limit)
+
+
+def _cases_on_extreme_date(
+    rows: list[dict[str, Any]], want_latest: bool
+) -> tuple[str, list[dict[str, Any]]]:
+    sorted_rows = sorted(
+        rows,
+        key=lambda r: (r.get("case_date", ""), r.get("case_no", "")),
+    )
+    if not sorted_rows:
+        return "", []
+    extreme_date = (
+        sorted_rows[-1].get("case_date", "")
+        if want_latest
+        else sorted_rows[0].get("case_date", "")
+    )
+    matches = [r for r in rows if r.get("case_date") == extreme_date]
+    matches.sort(key=lambda r: r.get("case_no", ""))
+    return extreme_date, matches
+
+
+def _date_extreme_html(rows: list[dict[str, Any]], message: str) -> str:
+    want_latest = _wants_latest_date(message) and not _wants_earliest_date(message)
+    label = "Latest" if want_latest else "Earliest"
+    extreme_date, cases = _cases_on_extreme_date(rows, want_latest)
+    if not cases:
+        return (
+            '<section class="query-result"><h3>Case date</h3>'
+            "<p>No cases in dataset.</p></section>"
+        )
+
+    lead = (
+        f'<section class="query-result"><h3>{label} case date</h3>'
+        f"<p>The <strong>{label.lower()}</strong> <code>case_date</code> in the dataset is "
+        f"<strong>{html.escape(extreme_date)}</strong>"
+    )
+    if cases:
+        lead += (
+            f" (case <strong>{html.escape(str(cases[0].get('case_no', '—')))}</strong>"
+            f"{f', +{len(cases) - 1} more on the same date' if len(cases) > 1 else ''})."
+        )
+    lead += "</p></section>"
+
+    table_title = f"{label} case(s) by case_date"
+    return lead + _cases_table_html(table_title, cases[:10])
 
 
 def execute_query(
@@ -292,6 +438,21 @@ def execute_query(
             "by_status": summary.get("by_status", {}),
         }
         return _with_banner(banner, _overview_html(summary)), intent, data
+
+    if intent == Intent.DATE_EXTREME:
+        want_latest = _wants_latest_date(message) and not _wants_earliest_date(message)
+        extreme_date, cases = _cases_on_extreme_date(rows, want_latest)
+        data = {
+            "extreme": "latest" if want_latest else "earliest",
+            "case_date": extreme_date,
+            "cases": [{col: c.get(col) for col in CASE_COLUMNS} for c in cases[:10]],
+            **_date_facts(rows),
+        }
+        return (
+            _with_banner(banner, _date_extreme_html(rows, message)),
+            intent,
+            data,
+        )
 
     if intent == Intent.SORT_CASES:
         cases = _sort_cases(rows, message, limit)
@@ -344,12 +505,23 @@ def execute_query(
     return None, intent, None
 
 
+def date_facts(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    return _date_facts(rows)
+
+
 def try_answer_locally(
     message: str,
     rows: list[dict[str, Any]],
     summary: dict[str, Any],
 ) -> str | None:
-    html_out, _, _ = execute_query(message, rows, summary)
+    normalized = normalize_user_message(message)
+    query_text = normalized or message.strip()
+
+    preflight = try_preflight_reply(query_text)
+    if preflight:
+        return preflight
+
+    html_out, _, _ = execute_query(query_text, rows, summary)
     return html_out
 
 
@@ -359,11 +531,30 @@ def build_llm_prompt(
     summary: dict[str, Any],
 ) -> tuple[str, dict[str, Any] | list[Any]] | None:
     """For unknown intents: pre-compute partial data and return standardized user prompt."""
-    _, intent, data = execute_query(message, rows, summary)
+    normalized = normalize_user_message(message)
+    query_text = normalized or message.strip()
+
+    preflight = try_preflight_reply(query_text)
+    if preflight:
+        return None
+
+    _, intent, data = execute_query(query_text, rows, summary)
     if data is None:
-        _, filtered_summary, _ = _apply_message_filters(message, rows, summary)
+        _, filtered_summary, _ = _apply_message_filters(query_text, rows, summary)
         data = {
             "summary": filtered_summary,
-            "hint": "Answer from summary statistics only",
+            "date_facts": _date_facts(rows),
+            "hint": (
+                "Answer using case_date on individual case rows. "
+                "Do not reply with only summary.date_range — cite case_no and case_date."
+            ),
         }
-    return build_chat_user_prompt(message, intent.value, data), data
+    return (
+        build_chat_user_prompt(
+            message,
+            intent.value,
+            data,
+            normalized_message=query_text if query_text != message.strip() else None,
+        ),
+        data,
+    )

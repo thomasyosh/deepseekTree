@@ -11,7 +11,8 @@ import config
 import filelogger
 import llm_client
 from prompts import CHAT_SYSTEM_PROMPT, REPORT_SYSTEM_PROMPT, build_chat_user_prompt
-from query_engine import build_llm_prompt, detect_intent, execute_query
+from chat_normalize import normalize_user_message
+from query_engine import build_llm_prompt, date_facts, detect_intent
 from report_builder import build_report_html
 from summary import build_summary
 
@@ -268,11 +269,25 @@ def build_chat_messages(
 ) -> list[dict[str, str]]:
     if rows:
         llm_prompt = build_llm_prompt(user_message, rows, summary)
-        user_content = llm_prompt[0] if llm_prompt else user_message
+        if llm_prompt:
+            user_content = llm_prompt[0]
+        else:
+            normalized = normalize_user_message(user_message)
+            query_text = normalized or user_message.strip()
+            user_content = build_chat_user_prompt(
+                user_message,
+                detect_intent(query_text, rows).value,
+                {"summary": summary, "date_facts": date_facts(rows)},
+                normalized_message=query_text if query_text != user_message.strip() else None,
+            )
     else:
-        intent = detect_intent(user_message).value
+        normalized = normalize_user_message(user_message)
+        query_text = normalized or user_message.strip()
         user_content = build_chat_user_prompt(
-            user_message, intent, {"summary": summary}
+            user_message,
+            detect_intent(query_text).value,
+            {"summary": summary},
+            normalized_message=query_text if query_text != user_message.strip() else None,
         )
 
     messages: list[dict[str, str]] = [
