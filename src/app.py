@@ -119,7 +119,7 @@ def _chat_response(
         "source": source,
         "question": message,
         "data_refreshed": data_refreshed,
-        "record_count": len(rows),
+        "record_count": summary.get("total_cases", len(rows)),
         "summary": summary,
         "trigger_download": trigger_download,
         "report_url": "/report.html" if config.REPORT_PATH.exists() else None,

@@ -53,7 +53,9 @@ def detect_intent(message: str, rows: list[dict[str, Any]] | None = None) -> Int
             "最新", "最近", "最舊", "最早", "排序", "sort", "order",
         )
     ):
-        return Intent.SORT_CASES
+        # "show only 2025 cases" must not be treated as a sort request.
+        if not _has_period_filter(message):
+            return Intent.SORT_CASES
 
     if any(
         t in lower or t in message
@@ -72,8 +74,31 @@ def detect_intent(message: str, rows: list[dict[str, Any]] | None = None) -> Int
 def _extract_limit(message: str, default: int = 5) -> int:
     match = re.search(r"(?:top|前|latest|newest|最近)\s*(\d+)", message, re.IGNORECASE)
     if match:
-        return max(1, min(int(match.group(1)), 20))
+        value = int(match.group(1))
+        # Ignore 4-digit years (e.g. 2025) mistaken for a row limit.
+        if 2000 <= value <= 2099 and re.search(rf"\b{value}\b", message):
+            return default
+        return max(1, min(value, 20))
     return default
+
+
+def _has_period_filter(message: str) -> bool:
+    start, end = _extract_date_range(message)
+    return bool(start or end)
+
+
+def _cases_for_period_report(
+    rows: list[dict[str, Any]], message: str, *, max_rows: int = 100
+) -> list[dict[str, Any]]:
+    """All rows in the filtered period (not a capped sample), optional severity filter."""
+    filtered = list(rows)
+    if _wants_severe(message):
+        filtered = [r for r in filtered if r.get("severity") == "嚴重"]
+    return sorted(
+        filtered,
+        key=lambda r: (r.get("case_date", ""), r.get("case_no", "")),
+        reverse=True,
+    )[:max_rows]
 
 
 def _wants_severe(message: str) -> bool:
@@ -176,6 +201,7 @@ def _extract_year_filter(message: str) -> tuple[str | None, str | None]:
         r"(?:in|for|during)\s+(20\d{2})\b(?!\d)",
         r"\b(20\d{2})\s*年",
         r"year\s+(20\d{2})\b",
+        r"(?:only|show|filter|display|adjust)\b.*?\b(20\d{2})\b",
     ]
     for pattern in patterns:
         match = re.search(pattern, message, re.IGNORECASE)
@@ -369,13 +395,15 @@ def _overview_html(summary: dict[str, Any]) -> str:
 
 def _period_report_html(
     summary: dict[str, Any],
-    sample_cases: list[dict[str, Any]],
+    cases: list[dict[str, Any]],
     start: str | None,
     end: str | None,
 ) -> str:
     """Structured HTML for a date/year filtered slice of the dataset."""
     dr = summary.get("date_range", ["—", "—"])
     period = f"{start or dr[0]} → {end or dr[1]}"
+    total = summary.get("total_cases", 0)
+    shown = len(cases)
     districts = Counter(summary.get("by_district", {})).most_common(5)
     district_rows = "".join(
         f"<li><strong>{html.escape(name)}</strong>: {count} cases</li>"
@@ -394,15 +422,19 @@ def _period_report_html(
 
     return (
         f'<section class="query-result"><h3>Filtered report</h3>'
-        f"<p>Showing <strong>{summary.get('total_cases', 0)}</strong> cases where "
+        f"<p>Found <strong>{total}</strong> cases where "
         f"<code>case_date</code> is between "
         f"<strong>{html.escape(period)}</strong>.</p>"
-        f"<ul><li><strong>Total trees:</strong> {summary.get('total_trees', 0)}</li></ul>"
+        f"<ul><li><strong>Total trees:</strong> {summary.get('total_trees', 0)}</li>"
+        f"<li><strong>Listed below:</strong> {shown} case(s)</li></ul>"
         f"<h3>Top districts</h3><ol>{district_rows}</ol>"
         f"<h3>By severity</h3><ul>{severity_rows}</ul>"
         f"<h3>By status</h3><ul>{status_rows}</ul>"
         f"</section>"
-        + _cases_table_html("Sample cases in this period", sample_cases)
+        + _cases_table_html(
+            f"All matching cases ({shown} of {total})",
+            cases,
+        )
     )
 
 
@@ -469,12 +501,19 @@ def execute_query(
     If html is not None, use it directly. Otherwise pass intent+data to LLM with standardized prompt.
     """
     rows, summary, banner = _apply_message_filters(message, rows, summary)
+    start, end = _extract_date_range(message)
 
-    if not rows and banner:
+    if not rows and (banner or start or end):
         empty = (
             '<section class="query-result"><p>No cases found in the selected date range.</p></section>'
         )
-        return _with_banner(banner, empty), Intent.FILTER, []
+        return _with_banner(banner, empty), Intent.FILTER, summary
+
+    # Year/date filters take priority — return the full filtered set, not a sample.
+    if banner or start or end:
+        cases = _cases_for_period_report(rows, message)
+        body = _period_report_html(summary, cases, start, end)
+        return _with_banner(banner, body), Intent.FILTER, summary
 
     intent = detect_intent(message, rows)
     limit = _extract_limit(message)
@@ -552,12 +591,6 @@ def execute_query(
             intent,
             cases,
         )
-
-    start, end = _extract_date_range(message)
-    if banner or start or end:
-        sample = _sort_cases(rows, message, min(max(_extract_limit(message, 10), 10), 15))
-        body = _period_report_html(summary, sample, start, end)
-        return _with_banner(banner, body), Intent.FILTER, summary
 
     return None, intent, None
 
