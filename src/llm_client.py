@@ -15,6 +15,41 @@ def _request_timeout(read_timeout: int | None) -> tuple[int, int]:
     return (config.CHAT_CONNECT_TIMEOUT, read_timeout or config.CHAT_TIMEOUT)
 
 
+def _ollama_error_detail(response: requests.Response) -> str:
+    try:
+        data = response.json()
+        if isinstance(data, dict) and data.get("error"):
+            return str(data["error"])
+    except Exception:
+        pass
+    text = (response.text or "").strip()
+    return text[:400] if text else response.reason or "Unknown error"
+
+
+def _build_chat_payload(
+    model_name: str,
+    messages: list[dict[str, str]],
+    max_tokens: int,
+    *,
+    include_keep_alive: bool = True,
+    include_think: bool = True,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "model": model_name,
+        "messages": messages,
+        "stream": False,
+        "options": {
+            "num_predict": max_tokens,
+            "num_ctx": config.OLLAMA_NUM_CTX,
+        },
+    }
+    if include_keep_alive and config.OLLAMA_KEEP_ALIVE:
+        payload["keep_alive"] = config.OLLAMA_KEEP_ALIVE
+    if include_think and config.OLLAMA_THINK is not None:
+        payload["think"] = config.OLLAMA_THINK
+    return payload
+
+
 def _ollama_post(url: str, payload: dict[str, Any], read_timeout: int) -> dict[str, Any]:
     started = time.monotonic()
     response = requests.post(
@@ -27,6 +62,10 @@ def _ollama_post(url: str, payload: dict[str, Any], read_timeout: int) -> dict[s
     filelogger.logger.info(
         f"Ollama responded in {elapsed:.1f}s status={response.status_code} url={url}"
     )
+    if response.status_code >= 400:
+        detail = _ollama_error_detail(response)
+        filelogger.logger.error(f"Ollama error: {detail}")
+        response.reason = f"{response.reason}: {detail}"
     response.raise_for_status()
     return response.json()
 
@@ -66,26 +105,28 @@ def chat_completion(
 
     model_name = model or config.CHAT_MODEL
     read_timeout = timeout or config.CHAT_TIMEOUT
-    url = f"{config.OLLAMA_BASE_URL}/api/chat"
-    payload: dict[str, Any] = {
-        "model": model_name,
-        "messages": messages,
-        "stream": False,
-        "keep_alive": config.OLLAMA_KEEP_ALIVE,
-        "think": False,
-        "options": {
-            "num_predict": max_tokens,
-            "num_ctx": config.OLLAMA_NUM_CTX,
-        },
-    }
+    url = config.OLLAMA_CHAT_URL
+    payload = _build_chat_payload(model_name, messages, max_tokens)
 
     prompt_chars = sum(len(m.get("content", "")) for m in messages)
     filelogger.logger.info(
         f"Calling Ollama model={model_name} prompt_chars={prompt_chars} "
-        f"max_tokens={max_tokens} read_timeout={read_timeout}s"
+        f"max_tokens={max_tokens} read_timeout={read_timeout}s url={url}"
     )
 
-    data = _ollama_post(url, payload, read_timeout)
+    try:
+        data = _ollama_post(url, payload, read_timeout)
+    except requests.exceptions.HTTPError as e:
+        if e.response is not None and e.response.status_code == 400:
+            filelogger.logger.warning(
+                "Ollama 400 — retrying with minimal payload (no think/keep_alive)"
+            )
+            minimal = _build_chat_payload(
+                model_name, messages, max_tokens, include_keep_alive=False, include_think=False
+            )
+            data = _ollama_post(url, minimal, read_timeout)
+        else:
+            raise
     return _extract_chat_content(data, require_content=require_content)
 
 
@@ -189,6 +230,8 @@ def check_llm_health(timeout: int = 5) -> dict[str, Any]:
         "ok": False,
         "provider": "ollama",
         "base_url": config.OLLAMA_BASE_URL,
+        "chat_url": config.OLLAMA_CHAT_URL,
+        "openai_compat_url": config.OLLAMA_URL,
         "model_configured": config.CHAT_MODEL,
         "chat_timeout_seconds": config.CHAT_TIMEOUT,
         "models_available": [],

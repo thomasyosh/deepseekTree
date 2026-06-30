@@ -63,8 +63,19 @@ CHAT_MODEL = os.getenv("CHAT_MODEL") or AI_MODEL
 REPORT_MODEL = os.getenv("REPORT_MODEL") or AI_MODEL
 
 # Legacy URLs (derived from OLLAMA_BASE_URL)
-_ollama_base = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
+def _normalize_ollama_base(url: str) -> str:
+    """Use 127.0.0.1 — avoids Windows proxy issues with localhost."""
+    cleaned = url.rstrip("/")
+    if "://localhost" in cleaned:
+        cleaned = cleaned.replace("://localhost", "://127.0.0.1", 1)
+    return cleaned
+
+
+_ollama_base = _normalize_ollama_base(
+    os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+)
 OLLAMA_BASE_URL = _ollama_base
+OLLAMA_CHAT_URL = f"{_ollama_base}/api/chat"
 OLLAMA_URL = os.getenv("OLLAMA_URL") or f"{_ollama_base}/v1/chat/completions"
 
 _ollama_parts = urlparse(_ollama_base if "://" in _ollama_base else f"http://{_ollama_base}")
@@ -74,6 +85,17 @@ OLLAMA_PATH = "/api/chat"
 OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "600"))
 OLLAMA_NUM_CTX = int(os.getenv("OLLAMA_NUM_CTX", "1024"))
 OLLAMA_KEEP_ALIVE = os.getenv("OLLAMA_KEEP_ALIVE", "30m")
+# Optional: true/false for thinking models. Leave unset — sending think=false breaks some Ollama builds.
+_ollama_think_raw = os.getenv("OLLAMA_THINK", "").strip().lower()
+OLLAMA_THINK: bool | str | None
+if _ollama_think_raw in ("true", "1", "yes", "on"):
+    OLLAMA_THINK = True
+elif _ollama_think_raw in ("false", "0", "no", "off"):
+    OLLAMA_THINK = False
+elif _ollama_think_raw in ("low", "medium", "high"):
+    OLLAMA_THINK = _ollama_think_raw
+else:
+    OLLAMA_THINK = None
 CHAT_CONNECT_TIMEOUT = int(os.getenv("CHAT_CONNECT_TIMEOUT", "15"))
 CHAT_TIMEOUT = int(os.getenv("CHAT_TIMEOUT", "300"))
 CHAT_MAX_TOKENS = int(os.getenv("CHAT_MAX_TOKENS", "512"))

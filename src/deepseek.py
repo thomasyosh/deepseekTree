@@ -46,7 +46,7 @@ def _ollama_post_json(payload: dict[str, Any], timeout: int) -> dict[str, Any]:
                 {"status_code": resp.status, "text": text, "reason": resp.reason},
             )()
             raise requests.exceptions.HTTPError(
-                f"{resp.status} Client Error: {resp.reason} for url {config.OLLAMA_URL}",
+                f"{resp.status} Client Error: {resp.reason} for url {config.OLLAMA_CHAT_URL}",
                 response=fake_response,
             )
         return json.loads(text)
@@ -87,7 +87,8 @@ def check_ollama_health(timeout: int = 5) -> dict[str, Any]:
     """Probe Ollama /api/tags and return diagnostics for colleagues."""
     health: dict[str, Any] = {
         "ok": False,
-        "url": config.OLLAMA_URL,
+        "url": config.OLLAMA_CHAT_URL,
+        "base_url": config.OLLAMA_BASE_URL,
         "host": config.OLLAMA_HOST,
         "port": config.OLLAMA_PORT,
         "model_configured": config.CHAT_MODEL,
@@ -194,8 +195,11 @@ def _ollama_not_running_hints() -> list[str]:
 def ollama_troubleshooting_html(error: Exception | None = None) -> str:
     health = check_ollama_health(timeout=3)
     lines = [
-        "<p><strong>Could not reach Ollama.</strong></p>",
-        f"<p>Configured URL: <code>{health['url']}</code></p>",
+        "<p><strong>Ollama request failed.</strong></p>",
+        f"<p>Chat API: <code>{config.OLLAMA_CHAT_URL}</code></p>",
+        f"<p>Base URL: <code>{config.OLLAMA_BASE_URL}</code> "
+        f"(FastAPI demo host <code>{config.API_BASE_URL}</code> is separate — "
+        "Ollama always runs on this machine.)</p>",
     ]
     if health["error"]:
         lines.append(f"<p><em>{health['error']}</em></p>")

@@ -361,6 +361,24 @@ def chat(request: ChatRequest) -> dict[str, Any]:
                     "in .env.</p>"
                     f"<p><em>{e}</em></p>"
                 )
+            elif config.LLM_PROVIDER == "ollama" and status == 400:
+                detail = ""
+                if e.response is not None:
+                    try:
+                        detail = e.response.text[:300]
+                    except Exception:
+                        detail = str(e)
+                reply = (
+                    "<p><strong>Ollama returned 400 Bad Request.</strong></p>"
+                    f"<p>Endpoint: <code>{config.OLLAMA_CHAT_URL}</code></p>"
+                    "<p>Common fixes:</p><ul>"
+                    f"<li>Confirm model is installed: <code>ollama pull {config.CHAT_MODEL}</code></li>"
+                    "<li>Set <code>OLLAMA_BASE_URL=http://127.0.0.1:11434</code> in .env</li>"
+                    "<li>Do not set <code>OLLAMA_THINK=false</code> — leave it unset</li>"
+                    "<li>Restart Ollama and uvicorn after changing .env</li>"
+                    "</ul>"
+                    f"<p><em>{detail or e}</em></p>"
+                )
             elif config.LLM_PROVIDER == "ollama" and status == 500 and "killed" in str(e).lower():
                 reply = (
                     "<p><strong>Ollama ran out of memory.</strong></p>"
