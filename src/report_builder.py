@@ -721,9 +721,16 @@ def build_report_html(
 
     function isFastApiOrigin() {{
       if (isFilePage) return false;
-      const host = window.location.hostname;
-      const local = host === "127.0.0.1" || host === "localhost" || host === "[::1]";
-      return local && window.location.port === "8000";
+      try {{
+        const api = new URL(apiBase);
+        const pagePort = window.location.port || (window.location.protocol === "https:" ? "443" : "80");
+        const apiPort = api.port || (api.protocol === "https:" ? "443" : "80");
+        return window.location.hostname === api.hostname && pagePort === apiPort;
+      }} catch {{
+        const host = window.location.hostname;
+        const local = host === "127.0.0.1" || host === "localhost" || host === "[::1]";
+        return local && window.location.port === "8000";
+      }}
     }}
 
     function isCrossOriginPreview() {{
