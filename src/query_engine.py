@@ -11,8 +11,6 @@ import llm_client
 
 from chat_normalize import (
     fuzzy_match_district,
-    is_probably_in_scope,
-    is_probably_off_topic,
     is_system_meta_question,
     is_too_vague,
     normalize_user_message,
@@ -20,7 +18,6 @@ from chat_normalize import (
 from prompts import (
     build_chat_user_prompt,
     build_chat_welcome_html,
-    build_scope_redirect_html,
     build_system_meta_html,
 )
 from prompt_trace import build_local_prompt_trace
@@ -300,8 +297,12 @@ def _extract_ordinal_position(message: str) -> int | None:
         for word, position in word_to_pos.items():
             if re.search(rf"\b{word}\b", lower):
                 return position
-    if re.search(r"\b(most|highest|top)\b", lower):
+    if re.search(r"\b(most|highest)\b", lower) and not re.search(
+        r"\b(second|third|fourth|fifth|2nd|3rd)\b", lower
+    ):
         return 1
+    if re.search(r"\btop\s*\d+\b", lower):
+        return None
     return None
 
 
@@ -725,15 +726,35 @@ def try_system_meta_reply(message: str) -> str | None:
     return build_system_meta_html(info, message)
 
 
+def try_general_reply(message: str) -> str | None:
+    """Fast answers for common general questions (always returns HTML)."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    lower = normalize_user_message(message).lower()
+    if re.search(
+        r"\b("
+        r"today'?s?\s+date|what\s+is\s+today'?s?\s+date|what\s+date\s+is\s+it|"
+        r"what\s+day\s+is\s+it|current\s+date|今天(是)?几?号|今日日期|幾號|几号"
+        r")\b",
+        lower,
+    ):
+        now = datetime.now(ZoneInfo("Asia/Hong_Kong"))
+        return _simple_stat_html(
+            "Today's date",
+            now.strftime("%Y-%m-%d"),
+            now.strftime("Hong Kong: %A, %d %B %Y"),
+        )
+    return None
+
+
 def try_preflight_reply(message: str) -> str | None:
-    """Fast guidance for greetings, vague prompts, or clearly off-topic questions."""
+    """Fast guidance for greetings or vague prompts only — other questions go to AI."""
     if is_too_vague(message):
         return build_chat_welcome_html()
     meta = try_system_meta_reply(message)
     if meta:
         return meta
-    if is_probably_off_topic(message) and not is_probably_in_scope(message):
-        return build_scope_redirect_html()
     return None
 
 
@@ -1087,8 +1108,8 @@ def _preflight_trace(message: str, rows: list[dict[str, Any]], summary: dict[str
         handler = "system meta — model / configuration question"
         logic = "Answer from Ollama health and .env settings (not case data)."
     else:
-        handler = "off-topic redirect"
-        logic = "Question is outside the tree-complaint dataset scope."
+        handler = "welcome / guidance"
+        logic = "Show examples and usage hints."
     return {
         "title": "View local reasoning & rules",
         "route_label": "Answered locally — preflight",
@@ -1110,6 +1131,20 @@ def try_answer_locally(
     if preflight:
         trace = build_local_prompt_trace(_preflight_trace(message, rows, summary))
         return preflight, None, trace
+
+    general = try_general_reply(query_text)
+    if general:
+        trace = build_local_prompt_trace(
+            {
+                "title": "View local reasoning & rules",
+                "route_label": "Answered locally — general knowledge",
+                "handler": "calendar date (Asia/Hong_Kong)",
+                "logic": "Today's date answered instantly without calling the LLM.",
+                "original_question": message.strip(),
+                "normalized_question": query_text,
+            }
+        )
+        return general, None, trace
 
     analytics = try_analytics_reply(query_text, rows, summary)
     if analytics:

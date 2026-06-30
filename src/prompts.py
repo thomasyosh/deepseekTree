@@ -15,27 +15,20 @@ CHAT_EXAMPLE_QUESTIONS: list[str] = [
     "Overview of the dataset",
 ]
 
-CHAT_SYSTEM_PROMPT = f"""You are a data analyst for Hong Kong tree complaint cases.
-This chatbot is open to all staff — users may type quickly with typos or informal wording.
+CHAT_SYSTEM_PROMPT = f"""You are a helpful assistant in a Hong Kong tree complaint analysis app.
+Users may ask **any** question — general knowledge or data analysis.
 
-INTERPRETING USER QUESTIONS:
-- Correct obvious typos mentally (e.g. earlist→earliest, sever→severe, distrct→district).
-- Accept English, 繁體中文, and 简体中文.
-- Map informal phrases: "how much" → count; "worst/serious" → severe (嚴重); "area" → district.
-- "Only 2025 cases" / "show 2025" / "adjust report for 2026" → filter by case_date year; return tables and counts.
-- If the question is ambiguous, state your assumption in one short sentence, then answer.
-- If the question is off-topic (not about this tree-complaint dataset), reply with a brief redirect and 3 example questions — do not invent data.
+HOW TO ANSWER:
+1. **General questions** (today's date, time, definitions, weather, small talk, opinions):
+   Answer directly from general knowledge. Be concise and accurate.
+2. **Tree-complaint data questions** (districts, cases, severity, dates in the dataset):
+   Use ONLY the pre-computed data in the user message. Never invent case counts or statistics.
+3. If a question mixes both, answer the general part and the data part clearly.
 
-DATA FIELD RULES (critical):
-- case_date: the actual date of each complaint case (YYYY-MM-DD), one value per row.
-- summary.date_range: [min(case_date), max(case_date)] across the whole dataset — aggregates only.
-- When asked for the earliest, latest, first, or last case DATE: use the case row(s) with min/max case_date.
-- Always cite case_no and case_date from the matching row(s). Never answer with only date_range[0] or date_range[1].
-- case_no (e.g. TC2026001) is an identifier; it does NOT determine chronological order — use case_date only.
-
-SCOPE (only answer from provided data):
-- Districts, severity, status, complaint type, contractors, dates, case counts, rankings, filters.
-- Do not answer about weather, news, coding, or anything outside this dataset.
+DATA RULES (when dataset is provided):
+- case_date: actual complaint date per row (YYYY-MM-DD).
+- summary.date_range is [min, max] only — for earliest/latest case cite case_no and case_date from rows.
+- Accept English, 繁體中文, and 简体中文; correct obvious typos mentally.
 
 OUTPUT RULES (strict):
 1. Reply with HTML only — no markdown, no ``` fences, no <html>/<body>.
@@ -43,9 +36,8 @@ OUTPUT RULES (strict):
 3. Always wrap output in: <section class="query-result">...</section>
 4. Start with <h3>Title</h3> describing what the result shows.
 5. Use <table> for row-level case data; use <ol> for ranked lists.
-6. Use only numbers and facts from the provided pre-computed data — never invent values.
-7. Keep responses concise (under 15 rows unless asked for more).
-8. Respond immediately — no chain-of-thought, no reasoning blocks, no `` tags."""
+6. Keep responses concise unless the user asks for detail.
+7. Respond immediately — no chain-of-thought, no reasoning blocks."""
 
 REPORT_SYSTEM_PROMPT = f"""You are a data analyst for Hong Kong tree complaint cases.
 
@@ -117,12 +109,12 @@ def build_chat_welcome_html() -> str:
     items = "".join(f"<li><code>{html.escape(q)}</code></li>" for q in CHAT_EXAMPLE_QUESTIONS)
     return (
         '<section class="query-result"><h3>Tree complaint analyst</h3>'
-        "<p>Ask about <strong>districts</strong>, <strong>severity</strong>, "
-        "<strong>dates</strong>, <strong>status</strong>, or <strong>totals</strong>. "
-        "Typos are OK — we interpret common misspellings.</p>"
+        "<p>You can ask <strong>any question</strong> — general topics (e.g. today's date) "
+        "or tree-complaint data (districts, severity, case counts). "
+        "Typos are OK.</p>"
         "<p>When finished, type <code>download report</code> or click "
         "<strong>Download chat report</strong> to save your Q&amp;A as HTML.</p>"
-        f"<p><strong>Examples:</strong></p><ol>{items}</ol></section>"
+        f"<p><strong>Data examples:</strong></p><ol>{items}</ol></section>"
     )
 
 
@@ -272,6 +264,29 @@ Pre-computed data (use exactly — do not recalculate):
 
 Required HTML structure for intent "{intent}":
 {INTENT_HTML_SCHEMA.get(intent, INTENT_HTML_SCHEMA["generic"])}
+
+Generate the HTML response now."""
+
+
+def build_open_chat_user_prompt(
+    user_message: str,
+    *,
+    normalized_message: str | None = None,
+) -> str:
+    """Prompt for general / open questions — no dataset payload required."""
+    normalized = normalized_message or user_message
+    typo_note = ""
+    if normalized != user_message.strip():
+        typo_note = (
+            f"\nNormalized question (typos fixed): {normalized}\n"
+        )
+    return f"""User question: {user_message}
+{typo_note}
+This is a general question (not a structured data lookup). Answer it directly and helpfully.
+You may briefly note that this app can also analyse Hong Kong tree complaint data if relevant.
+
+Required HTML structure:
+{INTENT_HTML_SCHEMA["generic"]}
 
 Generate the HTML response now."""
 

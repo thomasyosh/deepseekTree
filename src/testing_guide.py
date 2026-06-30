@@ -229,18 +229,20 @@ def _routing_policy_html() -> str:
         <tbody>
           <tr>
             <td><span class="test-badge test-badge-local">local</span></td>
-            <td>Exact counts, filters, rankings, date/month/year slices, thresholds, comparisons with verifiable numbers</td>
-            <td>Top districts, earliest date, % 嚴重, contractors &gt; 5, 新個案 vs 跟進中</td>
+            <td>Exact counts, filters, rankings, today's date, model info</td>
+            <td>Top 5 districts, earliest case date, today's date, what model is running</td>
           </tr>
           <tr>
             <td><span class="test-badge test-badge-ai">ai</span></td>
-            <td>Open-ended prose, manager briefings, qualitative trends, ambiguous wording not covered by rules</td>
-            <td>Describe trends in plain language, narrative briefing, novel phrasing</td>
+            <td>General knowledge, narrative briefings, dataset questions rules cannot answer</td>
+            <td>Weather, describe trends, manager briefing, novel phrasing</td>
           </tr>
         </tbody>
       </table>
       <p class="test-policy-note">
-        Status line after each chat message shows <code>[local]</code> or <code>[ai]</code>.
+        Users can ask <strong>any question</strong>. General topics use <code>[ai]</code>;
+        exact data lookups use <code>[local]</code> when possible.
+        Status line after each message shows the route.
         For <strong>comparing models</strong> (e.g. 7b vs 14b), use the
         <strong>LLM evaluation battery</strong> below and run
         <code>python scripts/eval_models.py --models model-a,model-b</code>.

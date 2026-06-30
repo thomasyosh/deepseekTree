@@ -135,8 +135,78 @@ def is_probably_off_topic(message: str) -> bool:
 
 
 def is_probably_in_scope(message: str) -> bool:
-    lower = message.lower()
-    return any(hint in lower or hint in message for hint in _IN_SCOPE_HINTS)
+    """Whether the message looks like a tree-complaint data question."""
+    return is_dataset_data_question(message)
+
+
+_GENERAL_DATE_RE = re.compile(
+    r"\b("
+    r"today'?s?\s+date|what\s+is\s+today'?s?\s+date|what\s+date\s+is\s+it|"
+    r"what\s+day\s+is\s+it|current\s+date|今天(是)?几?号|今日日期|幾號|几号"
+    r")\b",
+    re.I,
+)
+
+
+def is_dataset_data_question(message: str) -> bool:
+    """Question needs tree-complaint rows / summary (not general knowledge)."""
+    cleaned = normalize_user_message(message)
+    if not cleaned:
+        return False
+    lower = cleaned.lower()
+    if _GENERAL_DATE_RE.search(lower):
+        return False
+    if is_system_meta_question(message):
+        return False
+    dataset_cues = (
+        "case",
+        "tree",
+        "district",
+        "severity",
+        "status",
+        "complaint",
+        "contractor",
+        "overview",
+        "case_date",
+        "case_no",
+        "個案",
+        "樹",
+        "區",
+        "嚴重",
+        "状态",
+        "狀態",
+        "投訴",
+        "投诉",
+        "概覽",
+        "最早",
+        "最新",
+        "總數",
+        "总数",
+        "earliest",
+        "latest",
+        "top ",
+        "rank",
+        "how many",
+        "narrative",
+        "briefing",
+    )
+    if any(c in lower or c in cleaned for c in dataset_cues):
+        return True
+    if re.search(r"\b(20\d{2})\b", cleaned) and re.search(
+        r"\b(case|cases|month|year|date|月|年)\b", lower
+    ):
+        return True
+    return False
+
+
+def is_open_general_question(message: str) -> bool:
+    """General knowledge / chit-chat — answer with AI (or local shortcuts), not dataset rules."""
+    if is_dataset_data_question(message) or is_system_meta_question(message):
+        return False
+    cleaned = normalize_user_message(message)
+    if not cleaned or is_too_vague(cleaned):
+        return False
+    return True
 
 
 def is_too_vague(message: str) -> bool:
