@@ -22,6 +22,7 @@ from prompts import (
 )
 from prompt_trace import build_local_prompt_trace
 from summary import build_summary
+from timeutil import now_hong_kong
 
 DATE_PATTERN = re.compile(r"(\d{4}-\d{2}-\d{2})")
 
@@ -728,10 +729,8 @@ def try_system_meta_reply(message: str) -> str | None:
 
 def try_general_reply(message: str) -> str | None:
     """Fast answers for common general questions (always returns HTML)."""
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
-
     lower = normalize_user_message(message).lower()
+
     if re.search(
         r"\b("
         r"today'?s?\s+date|what\s+is\s+today'?s?\s+date|what\s+date\s+is\s+it|"
@@ -739,12 +738,29 @@ def try_general_reply(message: str) -> str | None:
         r")\b",
         lower,
     ):
-        now = datetime.now(ZoneInfo("Asia/Hong_Kong"))
+        now = now_hong_kong()
         return _simple_stat_html(
             "Today's date",
             now.strftime("%Y-%m-%d"),
             now.strftime("Hong Kong: %A, %d %B %Y"),
         )
+
+    if re.search(r"\bweather\b", lower):
+        return (
+            '<section class="query-result"><h3>Weather in Hong Kong</h3>'
+            "<p>This app does <strong>not</strong> connect to a live weather API, "
+            "so it cannot show real-time temperature or rainfall.</p>"
+            "<p>For current conditions, check the "
+            '<a href="https://www.hko.gov.hk/en/index.html" target="_blank" '
+            'rel="noopener">Hong Kong Observatory (HKO)</a>.</p>'
+            "<p><strong>Typical climate:</strong> subtropical — hot, humid summers "
+            "(around 28–33°C) and mild, dry winters (around 15–20°C). "
+            "Typhoon season is roughly May to November.</p>"
+            "<p><em>For AI-generated commentary on weather, ensure Ollama is running "
+            "and ask again — the model may add general knowledge (not live readings).</em></p>"
+            "</section>"
+        )
+
     return None
 
 
@@ -1134,12 +1150,20 @@ def try_answer_locally(
 
     general = try_general_reply(query_text)
     if general:
+        handler = (
+            "calendar date (Hong Kong, UTC+8)"
+            if re.search(r"\bdate\b|几号|幾號", query_text.lower())
+            else "general knowledge (no live API)"
+        )
         trace = build_local_prompt_trace(
             {
                 "title": "View local reasoning & rules",
                 "route_label": "Answered locally — general knowledge",
-                "handler": "calendar date (Asia/Hong_Kong)",
-                "logic": "Today's date answered instantly without calling the LLM.",
+                "handler": handler,
+                "logic": (
+                    "Answered instantly without calling the LLM. "
+                    "Live external APIs (weather, etc.) are not connected in this app."
+                ),
                 "original_question": message.strip(),
                 "normalized_question": query_text,
             }

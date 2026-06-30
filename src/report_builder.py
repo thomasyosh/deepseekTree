@@ -992,6 +992,9 @@ def build_report_html(
 
     function isLikelyAiQuestion(text) {{
       const t = (text || "").toLowerCase();
+      if (/weather|today'?s?\s+date|what\s+date|what\s+day|current\s+date/.test(t)) {{
+        return true;
+      }}
       return /narrative|briefing|brifing|plain language|describe|executive summary|in your own words|suitable for a manager|what patterns|explain the trend|tell me about/.test(t);
     }}
 
