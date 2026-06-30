@@ -180,6 +180,8 @@ def build_system_meta_html(info: dict[str, Any], question: str) -> str:
     )
 
     status = "Connected" if info.get("ollama_ok") else "Not reachable"
+    if info.get("ollama_ok") is None:
+        status = "Configured (.env) — live status not checked"
     status_detail = ""
     if info.get("health_error"):
         status_detail = f"<p><em>{html.escape(str(info['health_error']))}</em></p>"

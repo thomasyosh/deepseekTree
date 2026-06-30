@@ -124,6 +124,24 @@ def warm_up_model(timeout: int | None = None) -> bool:
         return False
 
 
+def get_configured_model_info() -> dict[str, Any]:
+    """Model settings from .env only — no network (instant meta replies)."""
+    return {
+        "provider": config.LLM_PROVIDER,
+        "chat_model": config.CHAT_MODEL,
+        "report_model": config.REPORT_MODEL,
+        "ollama_base_url": config.OLLAMA_BASE_URL,
+        "chat_timeout_seconds": config.CHAT_TIMEOUT,
+        "chat_max_tokens": config.CHAT_MAX_TOKENS,
+        "ollama_ok": None,
+        "models_available": [],
+        "model_modified_at": None,
+        "model_size_bytes": None,
+        "health_error": None,
+        "health_hints": [],
+    }
+
+
 def get_runtime_model_info() -> dict[str, Any]:
     """Configured model settings plus live Ollama metadata when reachable."""
     health = check_llm_health()

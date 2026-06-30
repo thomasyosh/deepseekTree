@@ -41,6 +41,65 @@ class Intent(str, Enum):
 CASE_COLUMNS = ("case_no", "case_date", "district", "severity", "status", "complaint_type")
 
 
+def _is_case_row_list_question(message: str) -> bool:
+    """User wants a table of individual cases — not an aggregate ranking."""
+    lower = message.lower()
+    if re.search(r"\b(show|list|find|display|get)\b.{0,40}\bcases?\b", lower):
+        return True
+    if re.search(r"\b\d+\s+(newest|latest|oldest|earliest)\s+cases?\b", lower):
+        return True
+    if re.search(r"\bcases?\s+in\b", lower):
+        return True
+    return False
+
+
+def _is_aggregate_ranking_question(message: str) -> bool:
+    """Rank categories (districts, complaint types) — not row-level case lists."""
+    lower = message.lower()
+    rank_cues = (
+        "top",
+        "前",
+        "rank",
+        "most",
+        "highest",
+        "lowest",
+        "fewest",
+        "second",
+        "third",
+        "fourth",
+        "fifth",
+        "1st",
+        "2nd",
+        "3rd",
+        "4th",
+        "5th",
+        "common",
+        "frequent",
+    )
+    if not any(c in lower or c in message for c in rank_cues):
+        return False
+    if _is_case_row_list_question(message):
+        return False
+    category_cues = (
+        "district",
+        "complaint",
+        "contractor",
+        "status",
+        "severity",
+        "type",
+        "區",
+        "投訴",
+        "投诉",
+        "承办",
+        "承辦",
+    )
+    if any(c in lower or c in message for c in category_cues):
+        return True
+    if re.search(r"\btop\s*\d+", lower):
+        return True
+    return bool(re.search(r"\b(most|highest|lowest|second|third)\b", lower))
+
+
 def detect_intent(message: str, rows: list[dict[str, Any]] | None = None) -> Intent:
     lower = message.lower()
 
@@ -66,11 +125,14 @@ def detect_intent(message: str, rows: list[dict[str, Any]] | None = None) -> Int
         if not _has_period_filter(message):
             return Intent.SORT_CASES
 
+    if _is_aggregate_ranking_question(message):
+        return Intent.RANK
+
     if any(
         t in lower or t in message
         for t in ("top", "前", "rank", "most", "highest", "grep", "filter", "嚴重", "serious", "severe")
     ):
-        if any(t in lower or t in message for t in ("case", "個案", "记录", "記錄", "list", "列表")):
+        if _is_case_row_list_question(message):
             return Intent.FILTER
         return Intent.RANK
 
@@ -216,6 +278,72 @@ def _district_pair_complaint_html(message: str, rows: list[dict[str, Any]]) -> s
     return intro + "".join(blocks)
 
 
+def _extract_ordinal_position(message: str) -> int | None:
+    """Parse 1st / 2nd / second-highest / most / highest → rank position (1-based)."""
+    lower = message.lower()
+    ordinal_patterns = (
+        (r"\bsecond[\s-]*(highest|most|common|frequent|fewest|lowest)\b", 2),
+        (r"\bthird[\s-]*(highest|most|common|frequent|fewest|lowest)\b", 3),
+        (r"\bfourth[\s-]*(highest|most|common|frequent|fewest|lowest)\b", 4),
+        (r"\bfifth[\s-]*(highest|most|common|frequent|fewest|lowest)\b", 5),
+        (r"\b2nd\b", 2),
+        (r"\b3rd\b", 3),
+        (r"\b4th\b", 4),
+        (r"\b5th\b", 5),
+        (r"\b1st\b", 1),
+    )
+    for pattern, position in ordinal_patterns:
+        if re.search(pattern, lower):
+            return position
+    if re.search(r"\b(second|third|fourth|fifth)\b", lower):
+        word_to_pos = {"second": 2, "third": 3, "fourth": 4, "fifth": 5}
+        for word, position in word_to_pos.items():
+            if re.search(rf"\b{word}\b", lower):
+                return position
+    if re.search(r"\b(most|highest|top)\b", lower):
+        return 1
+    return None
+
+
+def _ordinal_rank_html(message: str, summary: dict[str, Any]) -> str | None:
+    """Answer 'second-highest district' / 'third most common complaint type' locally."""
+    position = _extract_ordinal_position(message)
+    if position is None:
+        return None
+
+    field = _rank_summary_key_from_message(message)
+    if not field:
+        if _wants_district(message):
+            field = ("by_district", "districts")
+        elif any(
+            t in message.lower() or t in message
+            for t in ("complaint type", "complaint", "投訴", "投诉", "類型", "类型")
+        ):
+            field = ("by_complaint_type", "complaint types")
+        elif _mentions_contractors(message):
+            field = ("by_contractor", "contractors")
+        else:
+            return None
+
+    key, label = field
+    ranked = Counter(summary.get(key, {})).most_common(position)
+    if len(ranked) < position:
+        return _simple_stat_html(
+            f"Rank #{position} by {label}",
+            "Not enough categories in the data",
+            f"Only {len(ranked)} distinct {label} available.",
+        )
+
+    name, count = ranked[position - 1]
+    ordinal = {1: "1st", 2: "2nd", 3: "3rd"}.get(position, f"{position}th")
+    singular = label[:-1] if label.endswith("s") else label
+    return _simple_stat_html(
+        f"{ordinal} ranked {singular} by case count",
+        f"{name} — {count} cases",
+        f"Ranked from summary.{key} across {summary.get('total_cases', 0)} total cases.",
+    )
+
+
 def try_analytics_reply(
     message: str,
     rows: list[dict[str, Any]],
@@ -226,6 +354,10 @@ def try_analytics_reply(
         return None
 
     lower = message.lower()
+
+    ordinal_html = _ordinal_rank_html(message, summary)
+    if ordinal_html:
+        return ordinal_html
 
     if re.search(
         r"(how many|number of|count of).{0,40}(unique\s+)?districts?",
@@ -564,18 +696,32 @@ def try_system_meta_reply(message: str) -> str | None:
     """Answer questions about the LLM / app setup without calling the model."""
     if not is_system_meta_question(message):
         return None
+    lower = message.lower()
+    wants_live_status = any(
+        phrase in lower
+        for phrase in (
+            "status",
+            "connected",
+            "reachable",
+            "installed",
+            "available",
+            "modified",
+            "updated",
+            "last updated",
+            "size",
+            "list model",
+        )
+    )
     try:
-        info = llm_client.get_runtime_model_info()
+        info = (
+            llm_client.get_runtime_model_info()
+            if wants_live_status
+            else llm_client.get_configured_model_info()
+        )
     except Exception as e:
-        info = {
-            "provider": "ollama",
-            "chat_model": "unknown",
-            "report_model": "unknown",
-            "ollama_base_url": "",
-            "ollama_ok": False,
-            "health_error": str(e),
-            "models_available": [],
-        }
+        info = llm_client.get_configured_model_info()
+        info["ollama_ok"] = False
+        info["health_error"] = str(e)
     return build_system_meta_html(info, message)
 
 
@@ -865,6 +1011,9 @@ def execute_query(
         return _with_banner(banner, _cases_table_html(title, cases)), intent, cases
 
     if intent == Intent.RANK:
+        ordinal_html = _ordinal_rank_html(message, summary)
+        if ordinal_html:
+            return _with_banner(banner, ordinal_html), intent, summary.get("by_district", {})
         rank_html, ranked = _rank_from_summary(message, summary)
         if rank_html:
             return _with_banner(banner, rank_html), intent, ranked

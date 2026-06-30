@@ -178,8 +178,9 @@ def is_export_request(message: str) -> bool:
 _META_MODEL_RE = re.compile(
     r"\b("
     r"ollama|deepseek|llm|"
-    r"what\s+model|which\s+model|model\s+name|model\s+running|model\s+used|"
-    r"model\s+configured|currently\s+running|"
+    r"what\s+model|which\s+model|what\s+is\s+the\s+model|"
+    r"model\s+name|model\s+running|model\s+used|"
+    r"model\s+configured|currently\s+running|running\s+model|"
     r"model\s+last\s+(updated|modified)|last\s+updated|"
     r"when\s+was\s+.*\bmodel\b|date\s+of\s+the\s+model|"
     r"what\s+ai|which\s+ai|ai\s+model|"
