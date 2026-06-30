@@ -1366,8 +1366,8 @@ def build_report_html(
         if (!replyHtml) {{
           addMessage(
             "assistant",
-            "<section class=\"query-result\"><p><strong>Empty reply from server.</strong></p>" +
-              "<p>Check server logs or try again. Local questions should return instantly with [local].</p></section>",
+            '<section class="query-result"><p><strong>Empty reply from server.</strong></p>' +
+              '<p>Check server logs or try again. Local questions should return instantly with [local].</p></section>',
             true
           );
         }} else {{
