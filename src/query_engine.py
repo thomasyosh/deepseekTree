@@ -146,6 +146,12 @@ def _contractors_threshold_html(summary: dict[str, Any], threshold: int) -> str:
     return _ranking_html(title, ranked)
 
 
+def is_narrative_request(message: str) -> bool:
+    """Whether the message should be answered with LLM prose, not local tables."""
+    normalized = normalize_user_message(message) or message.strip()
+    return _wants_narrative(normalized)
+
+
 def _wants_narrative(message: str) -> bool:
     """Open-ended prose / briefing requests — route to LLM, not overview tables."""
     lower = message.lower()

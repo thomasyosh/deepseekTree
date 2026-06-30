@@ -28,6 +28,7 @@ _TYPO_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\bstatu\b", re.I), "status"),
     (re.compile(r"\boverveiw\b", re.I), "overview"),
     (re.compile(r"\bsummery\b", re.I), "summary"),
+    (re.compile(r"\bbrifing\b", re.I), "briefing"),
     (re.compile(r"\bniumber\b", re.I), "number"),
     (re.compile(r"\bamout\b", re.I), "amount"),
     (re.compile(r"\badjust\s+the\s+report\b", re.I), "show"),

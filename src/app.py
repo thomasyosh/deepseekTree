@@ -15,7 +15,7 @@ import deepseek
 import filelogger
 import llm_client
 import main as pipeline
-from query_engine import try_answer_locally
+from query_engine import is_narrative_request, try_answer_locally
 from summary import build_summary
 from fastapi.middleware.cors import CORSMiddleware
 from chat_normalize import is_export_request
@@ -249,6 +249,8 @@ def chat(request: ChatRequest) -> dict[str, Any]:
         if request.refresh_data is not None
         else config.REFRESH_DATA_ON_CHAT
     )
+    if is_narrative_request(message):
+        should_refresh = False
 
     try:
         if should_refresh:
@@ -364,6 +366,10 @@ def chat(request: ChatRequest) -> dict[str, Any]:
             source=source,
             record_count=len(rows),
         )
+        if source == "ai":
+            filelogger.logger.info(
+                f"Chat AI reply length={len(reply)} chars for {message[:80]!r}"
+            )
         return _chat_response(
             reply=reply,
             source=source,

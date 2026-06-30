@@ -694,7 +694,7 @@ def build_report_html(
       </div>
       <div id="file-warning" class="file-warning"></div>
       <div id="live-server-info" class="live-server-info"></div>
-      <div id="chat-status" class="chat-status"></div>
+      <div id="chat-status" class="chat-status" aria-live="polite"></div>
       <div id="chat-messages" class="chat-messages"></div>
       <form id="chat-form" class="chat-input">
         <input id="chat-input" type="text" placeholder="{chat_placeholder}" autocomplete="off" />
@@ -939,6 +939,28 @@ def build_report_html(
 
     let chatInFlight = false;
     const dataRefreshTimeoutMs = 90000;
+    let chatTimer = null;
+
+    function isLikelyAiQuestion(text) {{
+      const t = (text || "").toLowerCase();
+      return /narrative|briefing|brifing|plain language|describe|executive summary|in your own words|suitable for a manager|what patterns|explain the trend|tell me about/.test(t);
+    }}
+
+    function startChatTimer(prefix) {{
+      const start = Date.now();
+      stopChatTimer();
+      chatTimer = setInterval(() => {{
+        const sec = Math.round((Date.now() - start) / 1000);
+        setStatus(prefix + " (" + sec + "s)…", true);
+      }}, 5000);
+    }}
+
+    function stopChatTimer() {{
+      if (chatTimer) {{
+        clearInterval(chatTimer);
+        chatTimer = null;
+      }}
+    }}
 
     function fetchOptions(method, body) {{
       const opts = {{
@@ -1323,7 +1345,11 @@ def build_report_html(
     form.addEventListener("submit", async (e) => {{
       e.preventDefault();
       const text = input.value.trim();
-      if (!text || chatInFlight) return;
+      if (!text) return;
+      if (chatInFlight) {{
+        setStatus("Still processing your previous question — please wait.", true);
+        return;
+      }}
 
       const endpoint = chatEndpoint();
       if (!endpoint) {{
@@ -1339,24 +1365,38 @@ def build_report_html(
 
       chatInFlight = true;
       setChatControlsDisabled(true);
-      addMessage("user", text, false);
-      input.value = "";
-      sendBtn.disabled = true;
-      sendBtn.classList.add("loading");
-      sendBtn.textContent = "Sending";
-      showThinking();
-      reportMain?.classList.add("main-updating");
+      const skipDataRefresh = isLikelyAiQuestion(text);
 
       try {{
-        setStatus("Step 1/2 — refreshing data from Supabase...", true);
-        const refreshed = await tryRefreshData();
+        setStatus("Received your question…", true);
+        addMessage("user", text, false);
+        input.value = "";
+        sendBtn.disabled = true;
+        sendBtn.classList.add("loading");
+        sendBtn.textContent = "Sending";
+        showThinking();
+        messages?.scrollIntoView({{ behavior: "smooth", block: "nearest" }});
+
+        let refreshed = false;
+        if (!skipDataRefresh) {{
+          reportMain?.classList.add("main-updating");
+          setStatus("Step 1/2 — refreshing data from Supabase…", true);
+          startChatTimer("Refreshing data");
+          refreshed = await tryRefreshData();
+          stopChatTimer();
+        }}
+
         setStatus(
-          (refreshed ? "Data refreshed. " : "Using cached data. ") +
-            "Step 2/2 — analysing your question (local rules or AI)...",
+          skipDataRefresh
+            ? "AI is drafting your answer — large models on CPU may take several minutes"
+            : (refreshed ? "Data refreshed. " : "Using cached data. ") +
+              "Step 2/2 — analysing your question (local rules or AI)…",
           true
         );
+        startChatTimer(skipDataRefresh ? "AI working" : "Analysing");
 
         const data = await postChat(text, true);
+        stopChatTimer();
         removeThinking();
         if (data.summary) {{
           updateReportPane(data.summary, data.record_count);
@@ -1382,6 +1422,7 @@ def build_report_html(
         addMessage("assistant", "Error: " + formatFetchError(err), false);
         setStatus("", false);
       }} finally {{
+        stopChatTimer();
         chatInFlight = false;
         setChatControlsDisabled(false);
         reportMain?.classList.remove("main-updating");
