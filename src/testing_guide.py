@@ -18,7 +18,7 @@ def _load_rows() -> list[dict[str, Any]]:
 
 
 def _route_for(question: str, rows: list[dict[str, Any]], summary: dict[str, Any]) -> str:
-    local, _ = try_answer_locally(question, rows, summary)
+    local, _, _ = try_answer_locally(question, rows, summary)
     return "local" if local else "ai"
 
 

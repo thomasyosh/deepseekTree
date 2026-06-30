@@ -15,6 +15,7 @@ import deepseek
 import filelogger
 import llm_client
 import main as pipeline
+from prompt_trace import build_ai_prompt_trace, build_local_prompt_trace
 from query_engine import is_narrative_request, try_answer_locally
 from summary import build_summary
 from fastapi.middleware.cors import CORSMiddleware
@@ -111,6 +112,7 @@ def _chat_response(
     summary: dict[str, Any],
     data_refreshed: bool,
     trigger_download: bool = False,
+    prompt_trace: str | None = None,
 ) -> dict[str, Any]:
     return {
         "reply": reply,
@@ -121,6 +123,7 @@ def _chat_response(
         "summary": summary,
         "trigger_download": trigger_download,
         "report_url": "/report.html" if config.REPORT_PATH.exists() else None,
+        "prompt_trace": prompt_trace,
     }
 
 
@@ -277,9 +280,20 @@ def chat(request: ChatRequest) -> dict[str, Any]:
                 summary=summary,
                 data_refreshed=should_refresh,
                 trigger_download=True,
+                prompt_trace=build_local_prompt_trace(
+                    {
+                        "route_label": "Export handler",
+                        "handler": "download chat report",
+                        "logic": (
+                            "No dataset query or LLM — builds HTML from this session's messages."
+                        ),
+                    }
+                ),
             )
 
-        local_reply, filtered_summary = try_answer_locally(message, rows, summary)
+        local_reply, filtered_summary, local_trace = try_answer_locally(
+            message, rows, summary
+        )
         if local_reply:
             _chat_history.append({"role": "user", "content": message})
             _chat_history.append({"role": "assistant", "content": local_reply})
@@ -296,10 +310,14 @@ def chat(request: ChatRequest) -> dict[str, Any]:
                 rows=rows,
                 summary=filtered_summary or summary,
                 data_refreshed=should_refresh,
+                prompt_trace=local_trace,
             )
 
         messages = deepseek.build_chat_messages(
             summary, _chat_history, message, rows=rows
+        )
+        ai_prompt_trace = build_ai_prompt_trace(
+            messages, model=config.CHAT_MODEL, source="ai"
         )
         try:
             reply = llm_client.chat_completion(
@@ -328,6 +346,9 @@ def chat(request: ChatRequest) -> dict[str, Any]:
                 "answers are returned instantly without AI.</p>"
             )
             source = "timeout"
+            ai_prompt_trace = build_ai_prompt_trace(
+                messages, model=config.CHAT_MODEL, source="timeout"
+            )
         except requests.exceptions.HTTPError as e:
             status = e.response.status_code if e.response is not None else None
             filelogger.logger.error(f"Chat request failed: {e}")
@@ -349,14 +370,23 @@ def chat(request: ChatRequest) -> dict[str, Any]:
             else:
                 reply = llm_client.llm_troubleshooting_html(e)
             source = "error"
+            ai_prompt_trace = build_ai_prompt_trace(
+                messages, model=config.CHAT_MODEL, source="error"
+            )
         except requests.exceptions.RequestException as e:
             filelogger.logger.error(f"Chat request failed: {e}")
             reply = llm_client.llm_troubleshooting_html(e)
             source = "error"
+            ai_prompt_trace = build_ai_prompt_trace(
+                messages, model=config.CHAT_MODEL, source="error"
+            )
         except Exception as e:
             filelogger.logger.error(f"Chat request failed: {e}")
             reply = llm_client.llm_troubleshooting_html(e)
             source = "error"
+            ai_prompt_trace = build_ai_prompt_trace(
+                messages, model=config.CHAT_MODEL, source="error"
+            )
 
         _chat_history.append({"role": "user", "content": message})
         _chat_history.append({"role": "assistant", "content": reply})
@@ -377,6 +407,7 @@ def chat(request: ChatRequest) -> dict[str, Any]:
             rows=rows,
             summary=summary,
             data_refreshed=should_refresh,
+            prompt_trace=ai_prompt_trace,
         )
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e

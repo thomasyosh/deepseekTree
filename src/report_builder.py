@@ -317,6 +317,48 @@ def build_report_html(
     .msg.thinking {{
       animation: pulse-thinking 1.5s ease-in-out infinite;
     }}
+    .prompt-trace {{
+      margin-top: 0.65rem;
+      border: 1px dashed var(--border);
+      border-radius: 8px;
+      background: #fafbfc;
+      font-size: 0.82rem;
+    }}
+    .prompt-trace summary {{
+      cursor: pointer;
+      padding: 0.5rem 0.75rem;
+      font-weight: 600;
+      color: var(--muted);
+      user-select: none;
+    }}
+    .prompt-trace summary:hover {{
+      color: var(--accent);
+    }}
+    .prompt-trace-section {{
+      padding: 0 0.75rem 0.65rem;
+      border-top: 1px solid var(--border);
+    }}
+    .prompt-trace-section h4 {{
+      margin: 0.5rem 0 0.25rem;
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      color: var(--muted);
+    }}
+    .prompt-trace-section pre {{
+      margin: 0;
+      padding: 0.5rem 0.6rem;
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 280px;
+      overflow: auto;
+      font-family: ui-monospace, "Cascadia Code", "Consolas", monospace;
+      font-size: 0.78rem;
+      line-height: 1.45;
+    }}
     @keyframes pulse-thinking {{
       0%, 100% {{ opacity: 0.55; }}
       50% {{ opacity: 1; }}
@@ -1261,6 +1303,9 @@ def build_report_html(
           body.textContent = item.text;
         }}
         el.appendChild(body);
+        if (item.role === "assistant" && item.promptTrace) {{
+          appendPromptTrace(el, item.promptTrace);
+        }}
         messages.appendChild(el);
       }});
       messages.scrollTop = messages.scrollHeight;
@@ -1323,7 +1368,15 @@ def build_report_html(
     clearBtn?.addEventListener("click", clearChatSession);
     newSessionBtn?.addEventListener("click", startNewChatSession);
 
-    function addMessage(role, text, isHtml) {{
+    function appendPromptTrace(container, traceHtml) {{
+      if (!traceHtml || !String(traceHtml).trim()) return;
+      const wrap = document.createElement("div");
+      wrap.innerHTML = traceHtml;
+      const trace = wrap.firstElementChild;
+      if (trace) container.appendChild(trace);
+    }}
+
+    function addMessage(role, text, isHtml, promptTrace) {{
       const el = document.createElement("div");
       el.className = "msg " + role;
       const label = document.createElement("div");
@@ -1337,9 +1390,14 @@ def build_report_html(
         body.textContent = text;
       }}
       el.appendChild(body);
+      if (role === "assistant" && promptTrace) {{
+        appendPromptTrace(el, promptTrace);
+      }}
       messages.appendChild(el);
       messages.scrollTop = messages.scrollHeight;
-      storedMessages.push({{ role, text, isHtml: !!isHtml }});
+      const item = {{ role, text, isHtml: !!isHtml }};
+      if (promptTrace) item.promptTrace = promptTrace;
+      storedMessages.push(item);
       saveStoredMessages(storedMessages);
     }}
 
@@ -1418,7 +1476,7 @@ def build_report_html(
             true
           );
         }} else {{
-          addMessage("assistant", replyHtml, true);
+          addMessage("assistant", replyHtml, true, data.prompt_trace || "");
         }}
         setStatus("Done" + suffix + (data.record_count ? " · " + data.record_count + " records" : ""), false);
         if (data.trigger_download) {{

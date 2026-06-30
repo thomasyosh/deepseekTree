@@ -1,4 +1,5 @@
 import html
+import json
 import re
 import calendar
 from collections import Counter
@@ -22,6 +23,7 @@ from prompts import (
     build_scope_redirect_html,
     build_system_meta_html,
 )
+from prompt_trace import build_local_prompt_trace
 from summary import build_summary
 
 DATE_PATTERN = re.compile(r"(\d{4}-\d{2}-\d{2})")
@@ -887,25 +889,122 @@ def date_facts(rows: list[dict[str, Any]]) -> dict[str, Any]:
     return _date_facts(rows)
 
 
+def _build_local_trace_context(
+    message: str,
+    rows: list[dict[str, Any]],
+    summary: dict[str, Any],
+    *,
+    intent: Intent | None = None,
+) -> dict[str, Any]:
+    """Collect routing metadata shown in the chat prompt-trace panel."""
+    query_text = normalize_user_message(message) or message.strip()
+    _, _, banner = _apply_message_filters(query_text, rows, summary)
+    start, end = _extract_date_range(query_text)
+    month_start, month_end = _extract_month_filter(query_text)
+    district = _extract_district(query_text, rows)
+    threshold = _extract_count_threshold(query_text)
+
+    filters: dict[str, Any] = {}
+    if banner:
+        filters["period_banner"] = banner
+    if start or end:
+        filters["case_date_range"] = [start, end]
+    if month_start:
+        filters["month_range"] = [month_start, month_end]
+    if district:
+        filters["district"] = district
+    if threshold is not None and _mentions_contractors(query_text):
+        filters["contractors_with_more_than"] = threshold
+
+    ctx: dict[str, Any] = {
+        "original_question": message.strip(),
+        "normalized_question": query_text,
+    }
+    if filters:
+        ctx["filters"] = filters
+    if intent is not None:
+        ctx["intent"] = intent.value
+    else:
+        ctx["intent"] = detect_intent(query_text, rows).value
+    return ctx
+
+
+def _preflight_trace(message: str, rows: list[dict[str, Any]], summary: dict[str, Any]) -> dict[str, Any]:
+    ctx = _build_local_trace_context(message, rows, summary)
+    if is_too_vague(message):
+        handler = "welcome — question too vague"
+        logic = "Return example questions without querying data or calling the LLM."
+    elif try_system_meta_reply(message):
+        handler = "system meta — model / configuration question"
+        logic = "Answer from Ollama health and .env settings (not case data)."
+    else:
+        handler = "off-topic redirect"
+        logic = "Question is outside the tree-complaint dataset scope."
+    return {
+        "title": "View local reasoning & rules",
+        "route_label": "Answered locally — preflight",
+        "handler": handler,
+        "logic": logic,
+        **ctx,
+    }
+
+
 def try_answer_locally(
     message: str,
     rows: list[dict[str, Any]],
     summary: dict[str, Any],
-) -> tuple[str | None, dict[str, Any] | None]:
+) -> tuple[str | None, dict[str, Any] | None, str | None]:
     normalized = normalize_user_message(message)
     query_text = normalized or message.strip()
 
     preflight = try_preflight_reply(query_text)
     if preflight:
-        return preflight, None
+        trace = build_local_prompt_trace(_preflight_trace(message, rows, summary))
+        return preflight, None, trace
 
     analytics = try_analytics_reply(query_text, rows, summary)
     if analytics:
-        return analytics, None
+        ctx = _build_local_trace_context(message, rows, summary)
+        trace = build_local_prompt_trace(
+            {
+                "title": "View local reasoning & rules",
+                "route_label": "Answered locally — analytics rules",
+                "handler": "pattern match on aggregates (counts, averages, comparisons)",
+                "logic": (
+                    "Matched a deterministic analytics rule in query_engine.try_analytics_reply. "
+                    "Numbers are computed directly from data.json — no LLM."
+                ),
+                **ctx,
+            }
+        )
+        return analytics, None, trace
 
-    html_out, _, data = execute_query(query_text, rows, summary)
+    html_out, intent, data = execute_query(query_text, rows, summary)
     filtered_summary = data if isinstance(data, dict) and "total_cases" in data else None
-    return html_out, filtered_summary
+    if not html_out:
+        return None, filtered_summary, None
+
+    ctx = _build_local_trace_context(message, rows, summary, intent=intent)
+    data_preview = ""
+    if isinstance(data, dict):
+        preview = {k: data[k] for k in list(data.keys())[:8]}
+        data_preview = json.dumps(preview, ensure_ascii=False, indent=2)
+    elif isinstance(data, list):
+        data_preview = f"{len(data)} case row(s) passed to template"
+    trace = build_local_prompt_trace(
+        {
+            "title": "View local reasoning & rules",
+            "route_label": "Answered locally — query engine",
+            "handler": f"execute_query → intent '{intent.value}'",
+            "logic": (
+                "Structured query: filters and intent select a pre-built HTML template. "
+                "No LLM — values come straight from the dataset."
+            ),
+            "data_preview": data_preview or None,
+            **ctx,
+        }
+    )
+    return html_out, filtered_summary, trace
 
 
 def build_llm_prompt(

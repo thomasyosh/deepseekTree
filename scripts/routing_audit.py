@@ -36,7 +36,7 @@ questions = [
 
 lines = []
 for q in questions:
-    local, _ = try_answer_locally(q, rows, summary)
+    local, _, _ = try_answer_locally(q, rows, summary)
     lines.append(f"{'LOCAL':6} | {q}" if local else f"{'AI':6} | {q}")
 
 (ROOT / "_routing_audit.txt").write_text("\n".join(lines), encoding="utf-8")
