@@ -1,5 +1,6 @@
 import html
 import re
+import calendar
 from collections import Counter
 from datetime import date
 from enum import Enum
@@ -83,7 +84,80 @@ def _extract_limit(message: str, default: int = 5) -> int:
         if 2000 <= value <= 2099 and re.search(rf"\b{value}\b", message):
             return default
         return max(1, min(value, 20))
+    if re.search(r"\bmost\b", message, re.IGNORECASE):
+        return 1
     return default
+
+
+def _extract_month_filter(message: str) -> tuple[str | None, str | None]:
+    """Parse YYYY-MM month ranges, e.g. 'month of 2025-12' or 'in 2025-12'."""
+    patterns = [
+        r"(?:month\s+of|in\s+(?:the\s+month\s+of)?|for)\s+(20\d{2})[-/](0[1-9]|1[0-2])\b",
+        r"(?<![0-9-])(20\d{2})-(0[1-9]|1[0-2])(?![0-9])",
+        r"(20\d{2})\s*年\s*(0?[1-9]|1[0-2])\s*月",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, message, re.IGNORECASE)
+        if not match:
+            continue
+        year, month = int(match.group(1)), int(match.group(2))
+        last_day = calendar.monthrange(year, month)[1]
+        return f"{year}-{month:02d}-01", f"{year}-{month:02d}-{last_day}"
+    return None, None
+
+
+def _rank_summary_key_from_message(message: str) -> tuple[str, str] | None:
+    """Map a ranking question to a summary counter field and label."""
+    lower = message.lower()
+    if any(
+        t in lower or t in message
+        for t in ("complaint type", "complaint", "投訴", "類型", "类型", "category")
+    ):
+        return "by_complaint_type", "complaint types"
+    if any(t in lower or t in message for t in ("status", "狀態", "状态")):
+        return "by_status", "statuses"
+    if any(t in lower or t in message for t in ("contractor", "承辦商", "承办商")):
+        return "by_contractor", "contractors"
+    if any(t in lower or t in message for t in ("species", "樹種", "树种", "tree species")):
+        return "by_tree_species", "tree species"
+    if _wants_district(message):
+        return "by_district", "districts"
+    if _wants_severe(message):
+        return "by_severity", "severity levels"
+    return None
+
+
+def _ranking_title(
+    label: str,
+    limit: int,
+    *,
+    start: str | None = None,
+    end: str | None = None,
+) -> str:
+    period = ""
+    if start or end:
+        period = f" ({start or '…'} → {end or '…'})"
+    if limit == 1:
+        singular = label[:-1] if label.endswith("s") else label
+        return f"Most common {singular}{period}"
+    return f"Top {limit} {label}{period}"
+
+
+def _rank_from_summary(
+    message: str,
+    summary: dict[str, Any],
+    *,
+    start: str | None = None,
+    end: str | None = None,
+) -> tuple[str | None, list[tuple[str, int]] | None]:
+    field = _rank_summary_key_from_message(message)
+    if not field:
+        return None, None
+    key, label = field
+    limit = _extract_limit(message)
+    ranked = Counter(summary.get(key, {})).most_common(limit)
+    title = _ranking_title(label, limit, start=start, end=end)
+    return _ranking_html(title, ranked), ranked
 
 
 def _has_period_filter(message: str) -> bool:
@@ -223,6 +297,10 @@ def _extract_date_range(message: str) -> tuple[str | None, str | None]:
     year_range = _extract_year_filter(message)
     if year_range[0]:
         return year_range
+
+    month_range = _extract_month_filter(message)
+    if month_range[0]:
+        return month_range
 
     lower = message.lower()
     today = date.today().isoformat()
@@ -537,7 +615,17 @@ def execute_query(
         )
         return _with_banner(banner, empty), Intent.FILTER, summary
 
-    # Year/date filters take priority — return the full filtered set, not a sample.
+    # Date filter + ranking (e.g. most complaint type in 2025-12).
+    if banner or start or end:
+        rank_html, ranked = _rank_from_summary(message, summary, start=start, end=end)
+        if rank_html:
+            return (
+                _with_banner(banner, rank_html),
+                Intent.RANK,
+                summary if isinstance(summary, dict) else ranked,
+            )
+
+    # Year/date filters — return the full filtered set when no ranking was requested.
     if banner or start or end:
         cases = _cases_for_period_report(rows, message)
         body = _period_report_html(summary, cases, start, end)
@@ -590,22 +678,9 @@ def execute_query(
         return _with_banner(banner, _cases_table_html(title, cases)), intent, cases
 
     if intent == Intent.RANK:
-        if any(t in message for t in ("complaint", "投訴", "類型", "类型")):
-            ranked = Counter(summary.get("by_complaint_type", {})).most_common(limit)
-            title = f"Top {limit} complaint types"
-            return _with_banner(banner, _ranking_html(title, ranked)), intent, ranked
-        if any(t in message for t in ("status", "狀態", "状态")):
-            ranked = Counter(summary.get("by_status", {})).most_common(limit)
-            title = f"Top {limit} statuses"
-            return _with_banner(banner, _ranking_html(title, ranked)), intent, ranked
-        if any(t in message for t in ("contractor", "承辦商", "承办商")):
-            ranked = Counter(summary.get("by_contractor", {})).most_common(limit)
-            title = f"Top {limit} contractors"
-            return _with_banner(banner, _ranking_html(title, ranked)), intent, ranked
-        if any(t in message for t in ("species", "樹種", "树种")):
-            ranked = Counter(summary.get("by_tree_species", {})).most_common(limit)
-            title = f"Top {limit} tree species"
-            return _with_banner(banner, _ranking_html(title, ranked)), intent, ranked
+        rank_html, ranked = _rank_from_summary(message, summary)
+        if rank_html:
+            return _with_banner(banner, rank_html), intent, ranked
         if _wants_district(message) or _wants_severe(message) or "top" in message.lower() or "前" in message:
             ranked = _rank_districts(rows, message, limit)
             label = "serious cases (嚴重)" if _wants_severe(message) else "total cases"
