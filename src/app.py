@@ -26,7 +26,8 @@ from report_builder import build_report_html, read_stored_narrative
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     filelogger.logger.info(
-        f"Startup: LLM_PROVIDER={config.LLM_PROVIDER}, ensuring dataset is available"
+        f"Startup: LLM_PROVIDER={config.LLM_PROVIDER}, "
+        f"CHAT_FORCE_AI={config.CHAT_FORCE_AI}, ensuring dataset is available"
     )
     pipeline.ensure_dataset(generate_report=True)
 
@@ -207,6 +208,7 @@ def api_config() -> dict[str, Any]:
         "api_base_url": config.API_BASE_URL,
         "chat_timeout_seconds": config.CHAT_TIMEOUT,
         "chat_model": config.CHAT_MODEL,
+        "chat_force_ai": config.CHAT_FORCE_AI,
         "ollama_base_url": config.OLLAMA_BASE_URL,
     }
 
@@ -252,7 +254,7 @@ def chat(request: ChatRequest) -> dict[str, Any]:
         if request.refresh_data is not None
         else config.REFRESH_DATA_ON_CHAT
     )
-    if is_narrative_request(message):
+    if config.CHAT_FORCE_AI or is_narrative_request(message):
         should_refresh = False
 
     try:
@@ -291,27 +293,28 @@ def chat(request: ChatRequest) -> dict[str, Any]:
                 ),
             )
 
-        local_reply, filtered_summary, local_trace = try_answer_locally(
-            message, rows, summary
-        )
-        if local_reply:
-            _chat_history.append({"role": "user", "content": message})
-            _chat_history.append({"role": "assistant", "content": local_reply})
-            chat_log.log_chat(
-                message,
-                reply=local_reply,
-                source="local",
-                record_count=len(rows),
+        if not config.CHAT_FORCE_AI:
+            local_reply, filtered_summary, local_trace = try_answer_locally(
+                message, rows, summary
             )
-            return _chat_response(
-                reply=local_reply,
-                source="local",
-                message=message,
-                rows=rows,
-                summary=filtered_summary or summary,
-                data_refreshed=should_refresh,
-                prompt_trace=local_trace,
-            )
+            if local_reply:
+                _chat_history.append({"role": "user", "content": message})
+                _chat_history.append({"role": "assistant", "content": local_reply})
+                chat_log.log_chat(
+                    message,
+                    reply=local_reply,
+                    source="local",
+                    record_count=len(rows),
+                )
+                return _chat_response(
+                    reply=local_reply,
+                    source="local",
+                    message=message,
+                    rows=rows,
+                    summary=filtered_summary or summary,
+                    data_refreshed=should_refresh,
+                    prompt_trace=local_trace,
+                )
 
         messages = deepseek.build_chat_messages(
             summary, _chat_history, message, rows=rows
@@ -342,8 +345,6 @@ def chat(request: ChatRequest) -> dict[str, Any]:
                 "<li>Use <code>deepseek-r1:7b</code> instead of 14b</li>"
                 "<li>First request loads the model — check server logs for warm-up</li>"
                 "</ul>"
-                "<p>For ranking questions (e.g. top 5 serious areas), "
-                "answers are returned instantly without AI.</p>"
             )
             source = "timeout"
             ai_prompt_trace = build_ai_prompt_trace(

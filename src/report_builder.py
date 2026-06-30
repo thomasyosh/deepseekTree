@@ -82,6 +82,7 @@ def build_report_html(
         quote=True,
     )
     chat_welcome_json = json.dumps(build_chat_welcome_html(), ensure_ascii=False)
+    chat_force_ai_flag = "true" if config.CHAT_FORCE_AI else "false"
     chat_placeholder = html.escape(CHAT_EXAMPLE_QUESTIONS[0])
 
     return f"""<!DOCTYPE html>
@@ -90,6 +91,7 @@ def build_report_html(
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="chat-timeout-seconds" content="{config.CHAT_TIMEOUT}" />
+  <meta name="chat-force-ai" content="{chat_force_ai_flag}" />
   <meta name="api-base-url" content="{api_base}" />
   <meta name="report-table-sections" content="{table_sections_json}" />
   <title>Tree Complaint Analysis Report</title>
@@ -758,6 +760,8 @@ def build_report_html(
       10
     );
     const clientTimeoutMs = (chatTimeoutSec + 120) * 1000;
+    const chatForceAi =
+      (document.querySelector('meta[name="chat-force-ai"]')?.content || "true") === "true";
     const isFilePage = window.location.protocol === "file:";
     const apiBase = configuredApiBase.replace(/\\/$/, "");
 
@@ -1433,10 +1437,15 @@ def build_report_html(
 
       chatInFlight = true;
       setChatControlsDisabled(true);
-      const skipDataRefresh = isLikelyAiQuestion(text);
+      const skipDataRefresh = chatForceAi || isLikelyAiQuestion(text);
 
       try {{
-        setStatus("Received your question…", true);
+        setStatus(
+          chatForceAi
+            ? "Sending to AI — all questions are handled by the model…"
+            : "Received your question…",
+          true
+        );
         addMessage("user", text, false);
         input.value = "";
         sendBtn.disabled = true;
@@ -1456,9 +1465,9 @@ def build_report_html(
 
         setStatus(
           skipDataRefresh
-            ? "AI is drafting your answer — large models on CPU may take several minutes"
+            ? "AI is working on your question — large models on CPU may take several minutes"
             : (refreshed ? "Data refreshed. " : "Using cached data. ") +
-              "Step 2/2 — analysing your question (local rules or AI)…",
+              "Step 2/2 — analysing your question…",
           true
         );
         startChatTimer(skipDataRefresh ? "AI working" : "Analysing");

@@ -240,9 +240,9 @@ def _routing_policy_html() -> str:
         </tbody>
       </table>
       <p class="test-policy-note">
-        Users can ask <strong>any question</strong>. General topics use <code>[ai]</code>;
-        exact data lookups use <code>[local]</code> when possible.
-        Status line after each message shows the route.
+        <strong>CHAT_FORCE_AI</strong> is on by default — every chat message goes to the LLM
+        (<code>[ai]</code>). Set <code>CHAT_FORCE_AI=false</code> in <code>.env</code> to
+        re-enable instant local answers for structured data questions.
         For <strong>comparing models</strong> (e.g. 7b vs 14b), use the
         <strong>LLM evaluation battery</strong> below and run
         <code>python scripts/eval_models.py --models model-a,model-b</code>.

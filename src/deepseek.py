@@ -15,6 +15,7 @@ from prompts import (
     REPORT_SYSTEM_PROMPT,
     build_chat_user_prompt,
     build_open_chat_user_prompt,
+    build_unified_chat_user_prompt,
 )
 from chat_normalize import is_dataset_data_question, normalize_user_message
 from query_engine import build_llm_prompt, date_facts, detect_intent
@@ -275,7 +276,17 @@ def build_chat_messages(
     normalized = normalize_user_message(user_message)
     query_text = normalized or user_message.strip()
 
-    if is_dataset_data_question(user_message):
+    if config.CHAT_FORCE_AI:
+        data: dict[str, Any] = {
+            "summary": summary,
+            "date_facts": date_facts(rows) if rows else {},
+        }
+        user_content = build_unified_chat_user_prompt(
+            user_message,
+            data,
+            normalized_message=query_text if query_text != user_message.strip() else None,
+        )
+    elif is_dataset_data_question(user_message):
         if rows:
             llm_prompt = build_llm_prompt(user_message, rows, summary)
             if llm_prompt:

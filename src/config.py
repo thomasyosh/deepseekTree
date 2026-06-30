@@ -80,6 +80,8 @@ CHAT_MAX_TOKENS = int(os.getenv("CHAT_MAX_TOKENS", "512"))
 OLLAMA_WARMUP = _env_bool("OLLAMA_WARMUP", default=True)
 REFRESH_REPORT_ON_CHAT = _env_bool("REFRESH_REPORT_ON_CHAT", default=False)
 REFRESH_DATA_ON_CHAT = _env_bool("REFRESH_DATA_ON_CHAT", default=True)
+# When true, every chat message goes to the LLM (no local query-engine shortcuts).
+CHAT_FORCE_AI = _env_bool("CHAT_FORCE_AI", default=True)
 API_BASE_URL = os.getenv("API_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
 
 if not VERIFY_SSL:

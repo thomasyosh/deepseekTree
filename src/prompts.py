@@ -290,3 +290,30 @@ Required HTML structure:
 
 Generate the HTML response now."""
 
+
+def build_unified_chat_user_prompt(
+    user_message: str,
+    data: dict[str, Any],
+    *,
+    normalized_message: str | None = None,
+) -> str:
+    """Single prompt for any user question — dataset attached, AI decides what to use."""
+    normalized = normalized_message or user_message
+    typo_note = ""
+    if normalized != user_message.strip():
+        typo_note = (
+            f"\nNormalized question (typos/phrasing fixed): {normalized}\n"
+            "Interpret intent from BOTH lines; prefer the normalized wording.\n"
+        )
+    return f"""User question: {user_message}
+{typo_note}
+Answer the user's question directly in HTML. You may use general knowledge for any topic.
+When the question is about tree-complaint data, use ONLY the pre-computed data below — never invent case counts.
+
+Pre-computed dataset (use when relevant):
+{json.dumps(data, ensure_ascii=False, indent=2)}
+
+Required HTML structure:
+{INTENT_HTML_SCHEMA["generic"]}
+
+Generate the HTML response now."""
