@@ -48,7 +48,9 @@ def detect_intent(message: str, rows: list[dict[str, Any]] | None = None) -> Int
     if _is_date_extreme_question(message):
         return Intent.DATE_EXTREME
 
-    if any(t in lower for t in ("overview", "summary", "total", "概覽", "概况", "總數")):
+    if not _wants_narrative(message) and any(
+        t in lower for t in ("overview", "summary", "total", "概覽", "概况", "總數")
+    ):
         return Intent.OVERVIEW
 
     if any(
@@ -104,6 +106,177 @@ def _extract_month_filter(message: str) -> tuple[str | None, str | None]:
         last_day = calendar.monthrange(year, month)[1]
         return f"{year}-{month:02d}-01", f"{year}-{month:02d}-{last_day}"
     return None, None
+
+
+def _mentions_contractors(message: str) -> bool:
+    lower = message.lower()
+    return any(t in lower or t in message for t in ("contractor", "承辦商", "承办商"))
+
+
+def _extract_count_threshold(message: str) -> int | None:
+    """Parse 'more than N' / 'more that N' / 'over N' style thresholds."""
+    lower = message.lower()
+    for pattern in (
+        r"more\s+(?:than|that)\s+(\d+)",
+        r"(?:over|above|greater\s+than)\s+(\d+)",
+        r"at\s+least\s+(\d+)\s+(?:cases?)?",
+    ):
+        match = re.search(pattern, lower)
+        if match:
+            return int(match.group(1))
+    match = re.search(r">\s*(\d+)", message)
+    if match:
+        return int(match.group(1))
+    return None
+
+
+def _contractors_threshold_html(summary: dict[str, Any], threshold: int) -> str:
+    ranked = [
+        (name, count)
+        for name, count in summary.get("by_contractor", {}).items()
+        if count > threshold
+    ]
+    ranked.sort(key=lambda x: (-x[1], str(x[0])))
+    title = f"Contractors with more than {threshold} cases"
+    if not ranked:
+        return (
+            f'<section class="query-result"><h3>{html.escape(title)}</h3>'
+            f"<p>No contractors have more than {threshold} cases in this dataset.</p></section>"
+        )
+    return _ranking_html(title, ranked)
+
+
+def _wants_narrative(message: str) -> bool:
+    """Open-ended prose / briefing requests — route to LLM, not overview tables."""
+    lower = message.lower()
+    return any(
+        phrase in lower
+        for phrase in (
+            "narrative",
+            "briefing",
+            "plain language",
+            "describe the",
+            "describe overall",
+            "explain the trend",
+            "what patterns",
+            "suitable for a manager",
+            "executive summary",
+            "tell me about",
+            "in your own words",
+        )
+    )
+
+
+def _simple_stat_html(title: str, value: str, detail: str = "") -> str:
+    body = f"<p><strong>{html.escape(value)}</strong></p>"
+    if detail:
+        body += f"<p>{html.escape(detail)}</p>"
+    return f'<section class="query-result"><h3>{html.escape(title)}</h3>{body}</section>'
+
+
+def _districts_mentioned(message: str, rows: list[dict[str, Any]]) -> list[str]:
+    districts = sorted({r["district"] for r in rows}, key=len, reverse=True)
+    found: list[str] = []
+    for name in districts:
+        if name in message and name not in found:
+            found.append(name)
+    return found
+
+
+def _district_pair_complaint_html(message: str, rows: list[dict[str, Any]]) -> str | None:
+    """Compare complaint-type mix between two named districts."""
+    lower = message.lower()
+    if not re.search(r"\b(compare|between|versus|vs\.?)\b", lower):
+        return None
+    if not any(t in lower or t in message for t in ("complaint", "投訴", "类型", "類型")):
+        return None
+    districts = _districts_mentioned(message, rows)
+    if len(districts) < 2:
+        return None
+
+    d1, d2 = districts[0], districts[1]
+    blocks = []
+    for district in (d1, d2):
+        subset = [r for r in rows if r.get("district") == district]
+        ranked = Counter(r.get("complaint_type") for r in subset).most_common(5)
+        title = f"Top complaint types in {district} ({len(subset)} cases)"
+        blocks.append(_ranking_html(title, ranked))
+    intro = (
+        f'<section class="query-result"><p>Comparing complaint types between '
+        f"<strong>{html.escape(d1)}</strong> and <strong>{html.escape(d2)}</strong>.</p></section>"
+    )
+    return intro + "".join(blocks)
+
+
+def try_analytics_reply(
+    message: str,
+    rows: list[dict[str, Any]],
+    summary: dict[str, Any],
+) -> str | None:
+    """Deterministic aggregate answers — exact numbers, no LLM."""
+    if _wants_narrative(message):
+        return None
+
+    lower = message.lower()
+
+    if re.search(
+        r"(how many|number of|count of).{0,40}(unique\s+)?districts?",
+        lower,
+    ):
+        count = len(summary.get("by_district", {}))
+        return _simple_stat_html(
+            "Unique districts",
+            str(count),
+            f"{count} distinct district values appear in case_date records.",
+        )
+
+    if re.search(r"(average|avg|mean).{0,30}trees?.{0,15}per\s+case", lower):
+        total_cases = summary.get("total_cases", 0)
+        total_trees = summary.get("total_trees", 0)
+        avg = round(total_trees / max(total_cases, 1), 2)
+        return _simple_stat_html(
+            "Average trees per case",
+            str(avg),
+            f"{total_trees} trees ÷ {total_cases} cases = {avg}.",
+        )
+
+    if re.search(r"\b(versus|vs\.?)\b", lower) or "对比" in message or "對比" in message:
+        statuses = summary.get("by_status", {})
+        mentioned = [name for name in statuses if name in message]
+        if len(mentioned) >= 2:
+            lines = "".join(
+                f"<li><strong>{html.escape(name)}</strong>: {statuses[name]} cases</li>"
+                for name in mentioned[:4]
+            )
+            return (
+                '<section class="query-result"><h3>Status comparison</h3>'
+                f"<ul>{lines}</ul></section>"
+            )
+
+    if ("explain" in lower or "why" in lower) and re.search(r"2025", message) and re.search(
+        r"2026", message
+    ):
+        y2025 = sum(1 for r in rows if str(r.get("case_date", "")).startswith("2025"))
+        y2026 = sum(1 for r in rows if str(r.get("case_date", "")).startswith("2026"))
+        dr = summary.get("date_range", ["—", "—"])
+        return (
+            '<section class="query-result"><h3>Why 2025 has fewer cases than 2026</h3>'
+            f"<ul>"
+            f"<li><strong>Cases with case_date in 2025:</strong> {y2025}</li>"
+            f"<li><strong>Cases with case_date in 2026:</strong> {y2026}</li>"
+            f"<li><strong>Dataset date range:</strong> {html.escape(str(dr[0]))} → "
+            f"{html.escape(str(dr[1]))}</li>"
+            f"</ul>"
+            f"<p>Most records fall in 2026 because the loaded data only spans "
+            f"from late December 2025 onward — not a full calendar year of 2025.</p>"
+            f"</section>"
+        )
+
+    pair = _district_pair_complaint_html(message, rows)
+    if pair:
+        return pair
+
+    return None
 
 
 def _rank_summary_key_from_message(message: str) -> tuple[str, str] | None:
@@ -631,6 +804,12 @@ def execute_query(
         body = _period_report_html(summary, cases, start, end)
         return _with_banner(banner, body), Intent.FILTER, summary
 
+    # Contractor count threshold (e.g. "more than 5 cases") — deterministic, not LLM.
+    threshold = _extract_count_threshold(message)
+    if threshold is not None and _mentions_contractors(message):
+        body = _contractors_threshold_html(summary, threshold)
+        return _with_banner(banner, body), Intent.FILTER, summary
+
     intent = detect_intent(message, rows)
     limit = _extract_limit(message)
 
@@ -713,6 +892,10 @@ def try_answer_locally(
     preflight = try_preflight_reply(query_text)
     if preflight:
         return preflight, None
+
+    analytics = try_analytics_reply(query_text, rows, summary)
+    if analytics:
+        return analytics, None
 
     html_out, _, data = execute_query(query_text, rows, summary)
     filtered_summary = data if isinstance(data, dict) and "total_cases" in data else None

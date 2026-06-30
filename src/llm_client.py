@@ -1,6 +1,7 @@
 """Local DeepSeek via Ollama using requests with proxy bypass."""
 from __future__ import annotations
 
+import re
 import time
 from typing import Any
 
@@ -216,6 +217,23 @@ def _model_available(model: str, available: list[str]) -> bool:
         return True
     prefix = f"{model}:"
     return any(name == model or name.startswith(prefix) for name in available)
+
+
+def sanitize_chat_reply(reply: str) -> str:
+    """Strip hidden reasoning blocks; ensure chat UI always has visible HTML."""
+    tick = "`"
+    think_block = tick + "think" + tick + r"[\s\S]*?" + tick + "/think" + tick
+    cleaned = re.sub(think_block, "", reply, flags=re.IGNORECASE).strip()
+    cleaned = re.sub(r"^```(?:html)?\s*", "", cleaned)
+    cleaned = re.sub(r"\s*```$", "", cleaned).strip()
+    if cleaned:
+        return cleaned
+    return (
+        '<section class="query-result"><p><strong>No visible reply from the model.</strong></p>'
+        "<p>The model may have used all tokens on internal reasoning. "
+        "Try a simpler question, increase <code>CHAT_MAX_TOKENS</code> in .env, "
+        "or use a question answered by the local query engine (<code>[local]</code>).</p></section>"
+    )
 
 
 def llm_troubleshooting_html(error: Exception | None = None) -> str:

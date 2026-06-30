@@ -33,6 +33,7 @@ _TYPO_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\badjust\s+the\s+report\b", re.I), "show"),
     (re.compile(r"\bonly\s+(20\d{2})\b", re.I), r"only \1 cases"),
     (re.compile(r"\bhw many\b", re.I), "how many"),
+    (re.compile(r"\bmore\s+that\b", re.I), "more than"),
 ]
 
 # Phrases users type → wording our intent engine understands better.

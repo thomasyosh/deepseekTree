@@ -60,10 +60,7 @@ app = FastAPI(title="Tree Complaint Analyst", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://127.0.0.1:8000",
-        "http://localhost:8000",
-        "http://127.0.0.1:5500",
-        "http://localhost:5500",
+        "*"
     ],
     allow_origin_regex=r"https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?",
     allow_credentials=True,
@@ -240,6 +237,7 @@ def refresh_data_only() -> dict[str, Any]:
         raise HTTPException(status_code=404, detail=str(e)) from e
 
 
+
 @app.post("/api/chat")
 def chat(request: ChatRequest) -> dict[str, Any]:
     message = request.message.strip()
@@ -308,6 +306,7 @@ def chat(request: ChatRequest) -> dict[str, Any]:
                 max_tokens=config.CHAT_MAX_TOKENS,
                 timeout=config.CHAT_TIMEOUT,
             )
+            reply = llm_client.sanitize_chat_reply(reply)
             source = "ai"
         except requests.exceptions.Timeout:
             filelogger.logger.error(

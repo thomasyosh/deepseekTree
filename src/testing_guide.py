@@ -38,6 +38,12 @@ def _compute_facts(rows: list[dict[str, Any]], summary: dict[str, Any]) -> dict[
     top_districts = Counter(summary.get("by_district", {})).most_common(3)
     avg_trees = summary.get("total_trees", 0) / max(summary.get("total_cases", 1), 1)
 
+    st = summary.get("by_status", {})
+    sha_tin = [r for r in rows if r.get("district") == "沙田"]
+    yuen_long = [r for r in rows if r.get("district") == "元朗"]
+    st_complaints = Counter(r.get("complaint_type") for r in sha_tin).most_common(2)
+    yl_complaints = Counter(r.get("complaint_type") for r in yuen_long).most_common(2)
+
     return {
         "total_cases": summary.get("total_cases", 0),
         "total_trees": summary.get("total_trees", 0),
@@ -51,8 +57,8 @@ def _compute_facts(rows: list[dict[str, Any]], summary: dict[str, Any]) -> dict[
         "latest_case": sorted_rows[-1].get("case_no"),
         "latest_date": sorted_rows[-1].get("case_date"),
         "contractors_over_5": big_contractors,
-        "status_new": summary.get("by_status", {}).get("新個案", 0),
-        "status_follow": summary.get("by_status", {}).get("跟進中", 0),
+        "status_new": st.get("新個案", 0),
+        "status_follow": st.get("跟進中", 0),
         "y2025": y2025,
         "y2026": y2026,
         "dec_count": len(dec),
@@ -60,6 +66,8 @@ def _compute_facts(rows: list[dict[str, Any]], summary: dict[str, Any]) -> dict[
         "severe_top_complaints": severe_complaints,
         "top_districts": top_districts,
         "top_complaint_types": Counter(summary.get("by_complaint_type", {})).most_common(5),
+        "st_top_complaints": st_complaints,
+        "yl_top_complaints": yl_complaints,
     }
 
 
@@ -79,105 +87,120 @@ def _test_cases(rows: list[dict[str, Any]], summary: dict[str, Any], facts: dict
         else "None above 5 cases"
     )
     severe_top = facts.get("severe_top_complaints") or []
-    severe_complaint_note = (
-        ", ".join(f"{n} ({c})" for n, c in severe_top) if severe_top else "—"
-    )
     top_dist = ", ".join(f"{n} ({c})" for n, c in (facts.get("top_districts") or [])[:3])
+    st_top = facts.get("st_top_complaints") or []
+    yl_top = facts.get("yl_top_complaints") or []
+    district_compare_note = (
+        f"沙田 top: {', '.join(f'{n} ({c})' for n, c in st_top[:2])}; "
+        f"元朗 top: {', '.join(f'{n} ({c})' for n, c in yl_top[:2])}"
+        if st_top or yl_top
+        else "Side-by-side complaint rankings per district"
+    )
 
     cases = [
         {
             "id": "local-earliest",
             "group": "local",
             "question": "What is the earliest case date?",
-            "expected": (
-                f"{facts.get('earliest_date')} (case {facts.get('earliest_case')})"
-            ),
-            "checks": "Status shows [local]. Uses case_date on a real row, not only date_range.",
+            "expected": f"{facts.get('earliest_date')} (case {facts.get('earliest_case')})",
+            "checks": "[local] — date_extreme on case_date rows.",
         },
         {
             "id": "local-dec-complaint",
             "group": "local",
             "question": "In the month of 2025-12, what is the most Category of Complaint Type.",
             "expected": dec_expected,
-            "checks": "Status shows [local]. Month filter 2025-12-01 → 2025-12-31 applied.",
+            "checks": "[local] — month filter + ranked complaint type.",
         },
         {
             "id": "local-severe-pct",
             "group": "local",
             "question": "What percentage of all cases are classified as 嚴重?",
-            "expected": f"{facts.get('severe_pct')}% ({facts.get('severity', {}).get('嚴重', 0)} of {facts.get('total_cases')})",
-            "checks": "Status shows [local]. Should match severity table.",
-        },
-        {
-            "id": "ai-districts",
-            "group": "ai",
-            "question": "How many unique districts appear in the dataset?",
-            "expected": str(facts.get("unique_districts", "—")),
-            "checks": "Status shows [ai]. Exact integer count.",
-        },
-        {
-            "id": "ai-avg-trees",
-            "group": "ai",
-            "question": "What is the average number of trees per case?",
             "expected": (
-                f"≈ {facts.get('avg_trees')} "
-                f"({facts.get('total_trees')} trees ÷ {facts.get('total_cases')} cases)"
+                f"{facts.get('severe_pct')}% "
+                f"({facts.get('severity', {}).get('嚴重', 0)} of {facts.get('total_cases')})"
             ),
-            "checks": "Status shows [ai]. Accept small rounding difference (e.g. 3.0 vs 3.04).",
+            "checks": "[local] — severity aggregate.",
         },
         {
-            "id": "ai-contractors",
-            "group": "ai",
+            "id": "local-contractors",
+            "group": "local",
             "question": "List contractors handling more than 5 cases.",
             "expected": contractor_expected,
-            "checks": "Status shows [ai]. All listed names must have count > 5.",
+            "checks": "[local] — contractor threshold filter (>5).",
         },
         {
-            "id": "ai-status-compare",
-            "group": "ai",
+            "id": "local-districts-count",
+            "group": "local",
+            "question": "How many unique districts appear in the dataset?",
+            "expected": str(facts.get("unique_districts", "—")),
+            "checks": "[local] — exact district cardinality.",
+        },
+        {
+            "id": "local-avg-trees",
+            "group": "local",
+            "question": "What is the average number of trees per case?",
+            "expected": (
+                f"{facts.get('avg_trees')} "
+                f"({facts.get('total_trees')} ÷ {facts.get('total_cases')})"
+            ),
+            "checks": "[local] — total_trees / total_cases.",
+        },
+        {
+            "id": "local-status-compare",
+            "group": "local",
             "question": "How many cases have status 新個案 versus 跟進中?",
             "expected": (
-                f"新個案: {facts.get('status_new')}, "
-                f"跟進中: {facts.get('status_follow')}"
+                f"新個案: {facts.get('status_new')}, 跟進中: {facts.get('status_follow')}"
             ),
-            "checks": "Status shows [ai]. Dataset has no status called 處理中.",
+            "checks": "[local] — status A vs B counts (no 處理中 in this dataset).",
         },
         {
-            "id": "ai-year-compare",
-            "group": "ai",
+            "id": "local-year-compare",
+            "group": "local",
             "question": "Explain why 2025 has fewer cases than 2026 in this dataset.",
             "expected": (
-                f"2025: {facts.get('y2025')} cases; 2026: {facts.get('y2026')} cases. "
-                f"Data spans {dr[0]} → {dr[1]} (mostly 2026)."
+                f"2025: {facts.get('y2025')}; 2026: {facts.get('y2026')}; "
+                f"range {dr[0]} → {dr[1]}"
             ),
-            "checks": "Status shows [ai]. Reasoning from dates; numbers must match.",
+            "checks": "[local] — templated explanation with exact year counts.",
         },
         {
-            "id": "narrative-trends",
-            "group": "narrative",
+            "id": "local-district-compare",
+            "group": "local",
+            "question": "Compare complaint types between 沙田 and 元朗.",
+            "expected": district_compare_note,
+            "checks": "[local] — top complaint types per district, both named.",
+        },
+        {
+            "id": "ai-trends",
+            "group": "ai",
             "question": "Describe the overall trend in complaint types across the dataset in plain language.",
             "expected": (
-                "Top types are broadly similar in volume "
+                "Prose summary; top types near "
                 + ", ".join(f"{n} ({c})" for n, c in (facts.get("top_complaint_types") or [])[:4])
-                + ". Narrative should not invent large gaps."
             ),
-            "checks": "Status shows [ai]. Qualitative — verify counts mentioned are plausible.",
+            "checks": "[ai] — narrative only; numbers cited should be plausible.",
         },
         {
-            "id": "narrative-briefing",
-            "group": "narrative",
+            "id": "ai-briefing",
+            "group": "ai",
             "question": "Give me a narrative summary suitable for a manager briefing.",
             "expected": (
-                f"Should mention ~{facts.get('total_cases')} cases, "
-                f"severity split (嚴重 {facts.get('severity', {}).get('嚴重', 0)}), "
-                f"and busy districts e.g. {top_dist}."
+                f"Prose (~{facts.get('total_cases')} cases, 嚴重 "
+                f"{facts.get('severity', {}).get('嚴重', 0)}, districts e.g. {top_dist})"
             ),
-            "checks": "Status shows [ai]. Numbers in prose must align with overview tables.",
+            "checks": "[ai] — must not be a dry overview table only.",
         },
     ]
 
     for case in cases:
         case["route"] = _route_for(case["question"], rows, summary)
+        case["route_ok"] = (
+            "yes" if (case["group"] == "ai" and case["route"] == "ai")
+            or (case["group"] == "local" and case["route"] == "local")
+            else "review"
+        )
     return cases
 
 
@@ -189,11 +212,110 @@ def _badge(route: str) -> str:
 
 def _group_label(group: str) -> str:
     labels = {
-        "local": "Baseline (rule engine)",
-        "ai": "AI — verifiable numbers",
-        "narrative": "AI — narrative quality",
+        "local": "Local query engine",
+        "ai": "AI model (DeepSeek)",
     }
     return labels.get(group, group)
+
+
+def _routing_policy_html() -> str:
+    return """
+    <div class="test-policy">
+      <h3>Routing policy</h3>
+      <table class="test-policy-table">
+        <thead>
+          <tr><th>Route</th><th>Use when</th><th>Examples</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="test-badge test-badge-local">local</span></td>
+            <td>Exact counts, filters, rankings, date/month/year slices, thresholds, comparisons with verifiable numbers</td>
+            <td>Top districts, earliest date, % 嚴重, contractors &gt; 5, 新個案 vs 跟進中</td>
+          </tr>
+          <tr>
+            <td><span class="test-badge test-badge-ai">ai</span></td>
+            <td>Open-ended prose, manager briefings, qualitative trends, ambiguous wording not covered by rules</td>
+            <td>Describe trends in plain language, narrative briefing, novel phrasing</td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="test-policy-note">
+        Status line after each chat message shows <code>[local]</code> or <code>[ai]</code>.
+        For <strong>comparing models</strong> (e.g. 7b vs 14b), use the
+        <strong>LLM evaluation battery</strong> below and run
+        <code>python scripts/eval_models.py --models model-a,model-b</code>.
+      </p>
+    </div>
+    """
+
+
+def _difficulty_badge(level: str) -> str:
+    return f'<span class="test-badge test-diff-{html.escape(level)}">{html.escape(level)}</span>'
+
+
+def _model_eval_section_html(rows: list[dict[str, Any]]) -> str:
+    from model_eval import build_eval_suite
+
+    suite = build_eval_suite(rows)
+    by_cat: dict[str, int] = {}
+    for c in suite:
+        by_cat[c.category] = by_cat.get(c.category, 0) + 1
+    cat_summary = ", ".join(f"{k}: {v}" for k, v in sorted(by_cat.items()))
+
+    cards = []
+    for i, case in enumerate(suite, 1):
+        q_esc = html.escape(case.question)
+        cards.append(
+            f'<article class="test-card test-card-eval" data-group="eval" data-category="{html.escape(case.category)}">'
+            f'<div class="test-card-head">'
+            f'<span class="test-card-num">E{i}</span>'
+            f'<span class="test-card-group">{html.escape(case.category)}</span>'
+            f'{_difficulty_badge(case.difficulty)}'
+            f'<span class="test-badge test-badge-ai">llm eval</span>'
+            f"</div>"
+            f'<p class="test-question">{q_esc}</p>'
+            f'<details class="test-answer-details" open>'
+            f"<summary>Ground truth (auto-scored)</summary>"
+            f'<p class="test-expected"><strong>Expected:</strong> {html.escape(case.expected_hint)}</p>'
+            f'<p class="test-checks">Scored automatically when you run <code>eval_models.py</code>.</p>'
+            f"</details>"
+            f"</article>"
+        )
+
+    return f"""
+    <div class="test-eval-section">
+      <h3>LLM evaluation battery ({len(suite)} questions)</h3>
+      <p class="test-intro">
+        These questions <strong>always call the model</strong> (not the local query engine) so you can
+        compare accuracy across <code>CHAT_MODEL</code> settings — e.g.
+        <code>deepseek-r1:7b</code> vs <code>deepseek-r1:14b</code>.
+        Categories: {html.escape(cat_summary)}.
+      </p>
+      <ol class="test-eval-steps">
+        <li>Ensure Ollama is running and models are pulled (<code>ollama pull …</code>).</li>
+        <li>From project root:
+          <code>python scripts/eval_models.py --models deepseek-r1:7b,deepseek-r1:14b</code></li>
+        <li>Open <code>eval_report.html</code> for a side-by-side pass/fail matrix.</li>
+        <li>Higher pass rate + reasonable latency = better model for this dataset.</li>
+      </ol>
+      <div class="test-toolbar">
+        <label class="test-filter-label" for="test-eval-filter">Category</label>
+        <select id="test-eval-filter" class="test-filter" aria-label="Filter eval questions">
+          <option value="all">All ({len(suite)})</option>
+          <option value="count">Count</option>
+          <option value="rank">Rank</option>
+          <option value="compare">Compare</option>
+          <option value="date">Date</option>
+          <option value="ratio">Ratio</option>
+          <option value="narrative">Narrative</option>
+          <option value="reasoning">Reasoning</option>
+        </select>
+      </div>
+      <div class="test-cards-grid" id="test-eval-grid">
+        {"".join(cards)}
+      </div>
+    </div>
+    """
 
 
 def build_testing_guide_html(
@@ -207,6 +329,7 @@ def build_testing_guide_html(
     facts = _compute_facts(rows, summary)
     tests = _test_cases(rows, summary, facts)
     sev = facts.get("severity", {})
+    route_issues = sum(1 for t in tests if t.get("route_ok") == "review")
 
     fact_cards = "".join(
         f'<div class="test-stat"><span class="test-stat-label">{html.escape(label)}</span>'
@@ -224,12 +347,19 @@ def build_testing_guide_html(
     test_cards = []
     for i, t in enumerate(tests, 1):
         q_esc = html.escape(t["question"])
+        mismatch = ""
+        if t.get("route_ok") == "review":
+            mismatch = (
+                '<span class="test-badge test-badge-warn" title="Routing differs from intended group">'
+                "route mismatch</span>"
+            )
         test_cards.append(
             f'<article class="test-card" data-group="{html.escape(t["group"])}">'
             f'<div class="test-card-head">'
             f'<span class="test-card-num">{i}</span>'
             f'<span class="test-card-group">{html.escape(_group_label(t["group"]))}</span>'
             f'{_badge(t["route"])}'
+            f"{mismatch}"
             f"</div>"
             f'<p class="test-question">{q_esc}</p>'
             f'<button type="button" class="test-try-btn" data-question="{q_esc}">Try in chat</button>'
@@ -237,10 +367,16 @@ def build_testing_guide_html(
             f"<summary>Expected answer &amp; checks</summary>"
             f'<p class="test-expected"><strong>Expected:</strong> {html.escape(t["expected"])}</p>'
             f'<p class="test-checks"><strong>Pass if:</strong> {html.escape(t["checks"])}</p>'
-            f'<p class="test-route-hint">Current routing: <code>[{html.escape(t["route"])}]</code> '
-            f"(recomputed when this report was generated)</p>"
+            f'<p class="test-route-hint">Live routing: <code>[{html.escape(t["route"])}]</code></p>'
             f"</details>"
             f"</article>"
+        )
+
+    warn_banner = ""
+    if route_issues:
+        warn_banner = (
+            f'<p class="test-warn-banner">{route_issues} question(s) routed differently than '
+            f"intended — check query_engine rules after code changes.</p>"
         )
 
     return f"""
@@ -248,32 +384,34 @@ def build_testing_guide_html(
       <details class="test-guide-panel" open>
         <summary class="test-guide-summary">
           <span class="test-guide-title">Model accuracy testing guide</span>
-          <span class="test-guide-sub">Use chat to verify answers against live data.json facts</span>
+          <span class="test-guide-sub">Local = exact data queries · AI = narrative / open-ended</span>
         </summary>
         <div class="test-guide-body">
           <p class="test-intro">
-            Ask each question in the chat panel. After the reply, check the status line:
-            <span class="test-badge test-badge-local">local</span> = deterministic query engine;
-            <span class="test-badge test-badge-ai">ai</span> = DeepSeek via Ollama.
-            Expand each card for the expected answer computed from the current dataset.
+            Use this checklist while testing whether DeepSeek is suitable for your dataset.
+            <span class="test-badge test-badge-local">local</span> answers are computed from
+            <code>data.json</code> (fast, exact).
+            <span class="test-badge test-badge-ai">ai</span> answers call Ollama (slower, judge prose quality).
           </p>
+          {_routing_policy_html()}
+          {warn_banner}
           <div class="test-stats-grid">{fact_cards}</div>
           <div class="test-toolbar">
             <label class="test-filter-label" for="test-filter">Show</label>
             <select id="test-filter" class="test-filter" aria-label="Filter test questions">
               <option value="all">All questions</option>
-              <option value="local">Baseline (local) only</option>
-              <option value="ai">AI verifiable only</option>
-              <option value="narrative">AI narrative only</option>
+              <option value="local">Local query engine only</option>
+              <option value="ai">AI model only</option>
             </select>
           </div>
           <div class="test-cards-grid" id="test-cards-grid">
             {"".join(test_cards)}
           </div>
+          {_model_eval_section_html(rows)}
           <p class="test-footnote">
             Severe-only top complaint types (reference):
             {html.escape(", ".join(f"{n} ({c})" for n, c in (facts.get("severe_top_complaints") or [])))}.
-            Re-generate this report after refreshing data to update expected values.
+            Reload the page after data refresh to recompute expected values.
           </p>
         </div>
       </details>

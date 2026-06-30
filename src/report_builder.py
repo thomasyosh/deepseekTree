@@ -527,6 +527,78 @@ def build_report_html(
       line-height: 1.45;
     }}
     .test-card.is-hidden {{ display: none; }}
+    .test-policy {{
+      margin-bottom: 1rem;
+      padding: 1rem;
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+    }}
+    .test-policy h3 {{
+      margin: 0 0 0.75rem;
+      font-size: 0.95rem;
+    }}
+    .test-policy-table {{
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+    }}
+    .test-policy-table th,
+    .test-policy-table td {{
+      text-align: left;
+      padding: 0.5rem 0.65rem;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }}
+    .test-policy-table th {{
+      background: #f8fafc;
+      font-weight: 600;
+    }}
+    .test-policy-note {{
+      margin: 0.75rem 0 0;
+      font-size: 0.82rem;
+      color: var(--muted);
+      line-height: 1.45;
+    }}
+    .test-badge-warn {{
+      background: #fef3c7;
+      color: #92400e;
+    }}
+    .test-warn-banner {{
+      background: #fef3c7;
+      color: #92400e;
+      padding: 0.65rem 0.85rem;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      margin-bottom: 1rem;
+    }}
+    .test-eval-section {{
+      margin-top: 1.5rem;
+      padding-top: 1.25rem;
+      border-top: 2px solid #dbeafe;
+    }}
+    .test-eval-section h3 {{
+      margin: 0 0 0.5rem;
+      font-size: 1.05rem;
+      color: #1e3a8a;
+    }}
+    .test-eval-steps {{
+      margin: 0 0 1rem 1.25rem;
+      padding: 0;
+      font-size: 0.88rem;
+      color: var(--muted);
+      line-height: 1.55;
+    }}
+    .test-eval-steps code {{
+      font-size: 0.82rem;
+    }}
+    .test-card-eval {{
+      border-color: #c4b5fd;
+      background: #faf5ff;
+    }}
+    .test-diff-easy {{ background: #dcfce7; color: #166534; }}
+    .test-diff-medium {{ background: #dbeafe; color: #1e40af; }}
+    .test-diff-hard {{ background: #fee2e2; color: #991b1b; }}
     @media (max-width: 900px) {{
       body {{ overflow: auto; }}
       .layout {{
@@ -569,6 +641,7 @@ def build_report_html(
       .msg {{ max-width: 100%; }}
       .test-cards-grid {{ grid-template-columns: 1fr; }}
       .test-stats-grid {{ grid-template-columns: repeat(2, 1fr); }}
+      .test-policy-table {{ display: block; overflow-x: auto; }}
     }}
     @media (max-width: 480px) {{
       .chat-header {{
@@ -1279,7 +1352,7 @@ def build_report_html(
         const refreshed = await tryRefreshData();
         setStatus(
           (refreshed ? "Data refreshed. " : "Using cached data. ") +
-            "Step 2/2 — waiting for AI (may take several minutes on CPU)...",
+            "Step 2/2 — analysing your question (local rules or AI)...",
           true
         );
 
@@ -1289,7 +1362,17 @@ def build_report_html(
           updateReportPane(data.summary, data.record_count);
         }}
         const suffix = data.source ? " [" + data.source + "]" : "";
-        addMessage("assistant", data.reply, true);
+        const replyHtml = (data.reply && String(data.reply).trim()) || "";
+        if (!replyHtml) {{
+          addMessage(
+            "assistant",
+            "<section class=\"query-result\"><p><strong>Empty reply from server.</strong></p>" +
+              "<p>Check server logs or try again. Local questions should return instantly with [local].</p></section>",
+            true
+          );
+        }} else {{
+          addMessage("assistant", replyHtml, true);
+        }}
         setStatus("Done" + suffix + (data.record_count ? " · " + data.record_count + " records" : ""), false);
         if (data.trigger_download) {{
           await downloadChatReport();
@@ -1397,6 +1480,19 @@ def build_report_html(
         setStatus("Question copied to chat — press Send to test.", false);
       }});
     }});
+
+    const testEvalFilter = document.getElementById("test-eval-filter");
+    const testEvalGrid = document.getElementById("test-eval-grid");
+    if (testEvalFilter && testEvalGrid) {{
+      testEvalFilter.addEventListener("change", () => {{
+        const value = testEvalFilter.value;
+        testEvalGrid.querySelectorAll(".test-card-eval").forEach((card) => {{
+          const cat = card.getAttribute("data-category") || "";
+          const show = value === "all" || cat === value;
+          card.classList.toggle("is-hidden", !show);
+        }});
+      }});
+    }}
   </script>
 </body>
 </html>
