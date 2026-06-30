@@ -6,6 +6,7 @@ from typing import Any
 
 import config
 from prompts import CHAT_EXAMPLE_QUESTIONS, build_chat_welcome_html
+from testing_guide import build_testing_guide_html
 
 TABLE_SECTIONS: list[tuple[str, str]] = [
     ("by_district", "Cases by District"),
@@ -51,7 +52,11 @@ def _table(title: str, data: dict[str, int]) -> str:
     """
 
 
-def build_report_html(summary: dict[str, Any], narrative: str) -> str:
+def build_report_html(
+    summary: dict[str, Any],
+    narrative: str,
+    rows: list[dict[str, Any]] | None = None,
+) -> str:
     overview = f"""
     <section class="card">
       <h2>Overview</h2>
@@ -70,6 +75,7 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
     )
 
     safe_narrative = narrative.strip() or "<p>No narrative generated.</p>"
+    testing_guide = build_testing_guide_html(summary, rows)
     api_base = html.escape(config.API_BASE_URL)
     table_sections_json = html.escape(
         json.dumps([{"key": k, "title": t} for k, t in TABLE_SECTIONS]),
@@ -352,6 +358,175 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
       pointer-events: none;
       transition: opacity 0.2s;
     }}
+    .test-guide {{
+      border-color: #bfdbfe;
+      background: linear-gradient(180deg, #f8fbff 0%, var(--card) 4rem);
+    }}
+    .test-guide-panel {{ border: none; }}
+    .test-guide-summary {{
+      cursor: pointer;
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+      padding: 0.15rem 0;
+    }}
+    .test-guide-summary::-webkit-details-marker {{ display: none; }}
+    .test-guide-summary::before {{
+      content: "▸";
+      float: left;
+      margin-right: 0.5rem;
+      color: var(--accent);
+      transition: transform 0.15s;
+    }}
+    .test-guide-panel[open] .test-guide-summary::before {{
+      transform: rotate(90deg);
+    }}
+    .test-guide-title {{
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: #1e3a8a;
+    }}
+    .test-guide-sub {{
+      font-size: 0.85rem;
+      color: var(--muted);
+      margin-left: 1.25rem;
+    }}
+    .test-guide-body {{ margin-top: 1rem; }}
+    .test-intro {{
+      font-size: 0.92rem;
+      line-height: 1.55;
+      color: var(--muted);
+      margin: 0 0 1rem;
+    }}
+    .test-badge {{
+      display: inline-block;
+      font-size: 0.7rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      padding: 0.15rem 0.45rem;
+      border-radius: 999px;
+      vertical-align: middle;
+    }}
+    .test-badge-local {{
+      background: #dcfce7;
+      color: #166534;
+    }}
+    .test-badge-ai {{
+      background: #ede9fe;
+      color: #5b21b6;
+    }}
+    .test-stats-grid {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 0.65rem;
+      margin-bottom: 1rem;
+    }}
+    .test-stat {{
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0.65rem 0.75rem;
+    }}
+    .test-stat-label {{
+      display: block;
+      font-size: 0.75rem;
+      color: var(--muted);
+      margin-bottom: 0.2rem;
+    }}
+    .test-stat-value {{
+      font-size: 0.95rem;
+      font-weight: 600;
+      word-break: break-word;
+    }}
+    .test-toolbar {{
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 0.75rem;
+      flex-wrap: wrap;
+    }}
+    .test-filter-label {{
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--muted);
+    }}
+    .test-filter {{
+      padding: 0.4rem 0.65rem;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 0.9rem;
+      background: #fff;
+      min-width: 12rem;
+    }}
+    .test-cards-grid {{
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 0.75rem;
+    }}
+    .test-card {{
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 0.85rem 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      min-width: 0;
+    }}
+    .test-card-head {{
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      flex-wrap: wrap;
+    }}
+    .test-card-num {{
+      font-weight: 700;
+      color: var(--accent);
+      font-size: 0.85rem;
+    }}
+    .test-card-group {{
+      font-size: 0.75rem;
+      color: var(--muted);
+      flex: 1;
+    }}
+    .test-question {{
+      margin: 0;
+      font-size: 0.92rem;
+      line-height: 1.45;
+      font-weight: 500;
+    }}
+    .test-try-btn {{
+      align-self: flex-start;
+      padding: 0.4rem 0.75rem;
+      font-size: 0.8rem;
+      font-weight: 600;
+      border: 1px solid var(--accent);
+      background: #eff6ff;
+      color: var(--accent);
+      border-radius: 8px;
+      cursor: pointer;
+    }}
+    .test-try-btn:hover {{ background: #dbeafe; }}
+    .test-answer-details {{
+      font-size: 0.82rem;
+      color: var(--muted);
+      line-height: 1.5;
+    }}
+    .test-answer-details summary {{
+      cursor: pointer;
+      font-weight: 600;
+      color: var(--text);
+    }}
+    .test-expected, .test-checks, .test-route-hint {{ margin: 0.5rem 0 0; }}
+    .test-footnote {{
+      margin: 1rem 0 0;
+      font-size: 0.8rem;
+      color: var(--muted);
+      line-height: 1.45;
+    }}
+    .test-card.is-hidden {{ display: none; }}
     @media (max-width: 900px) {{
       body {{ overflow: auto; }}
       .layout {{
@@ -392,6 +567,8 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
       }}
       .chat-input input {{ font-size: 16px; }}
       .msg {{ max-width: 100%; }}
+      .test-cards-grid {{ grid-template-columns: 1fr; }}
+      .test-stats-grid {{ grid-template-columns: repeat(2, 1fr); }}
     }}
     @media (max-width: 480px) {{
       .chat-header {{
@@ -408,6 +585,8 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
         width: 100%;
         padding: 0.75rem;
       }}
+      .test-stats-grid {{ grid-template-columns: 1fr; }}
+      .test-filter {{ width: 100%; }}
     }}
   </style>
 </head>
@@ -417,6 +596,7 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
       <h1>Tree Complaint Analysis Report</h1>
       <p id="report-data-updated" class="data-updated" aria-live="polite"></p>
       <div id="report-overview">{overview}</div>
+      {testing_guide}
       <div id="report-tables">{tables}</div>
       <section class="card narrative" id="report-narrative">
         <h2>AI Analysis</h2>
@@ -1194,6 +1374,29 @@ def build_report_html(summary: dict[str, Any], narrative: str) -> str:
     }}
 
     downloadBtn?.addEventListener("click", downloadChatReport);
+
+    const testFilter = document.getElementById("test-filter");
+    const testCardsGrid = document.getElementById("test-cards-grid");
+    if (testFilter && testCardsGrid) {{
+      testFilter.addEventListener("change", () => {{
+        const value = testFilter.value;
+        testCardsGrid.querySelectorAll(".test-card").forEach((card) => {{
+          const group = card.getAttribute("data-group") || "";
+          const show = value === "all" || group === value;
+          card.classList.toggle("is-hidden", !show);
+        }});
+      }});
+    }}
+    document.querySelectorAll(".test-try-btn").forEach((btn) => {{
+      btn.addEventListener("click", () => {{
+        const q = btn.getAttribute("data-question");
+        if (!q || !input) return;
+        input.value = q;
+        input.focus();
+        chatSidebar?.scrollIntoView({{ behavior: "smooth", block: "nearest" }});
+        setStatus("Question copied to chat — press Send to test.", false);
+      }});
+    }});
   </script>
 </body>
 </html>

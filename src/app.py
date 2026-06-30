@@ -165,9 +165,9 @@ def index() -> HTMLResponse:
     """Always build the page from the latest UI template (avoids stale report.html)."""
     headers = {"Cache-Control": "no-store"}
     try:
-        _, summary = _load_dataset()
+        rows, summary = _load_dataset()
         narrative = read_stored_narrative(config.REPORT_PATH)
-        html = build_report_html(summary, narrative)
+        html = build_report_html(summary, narrative, rows=rows)
         return HTMLResponse(html, headers=headers)
     except (FileNotFoundError, ValueError):
         if config.REPORT_PATH.exists():

@@ -337,7 +337,7 @@ def analyze(
             narrative = (
                 "<p><em>AI analysis unavailable. Review the summary tables above.</em></p>"
             )
-    html = build_report_html(summary, narrative)
+    html = build_report_html(summary, narrative, rows=rows)
     report_path.write_text(html, encoding="utf-8")
     filelogger.logger.info(f"Report written to {report_path}")
     return report_path
