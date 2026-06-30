@@ -123,6 +123,48 @@ def warm_up_model(timeout: int | None = None) -> bool:
         return False
 
 
+def get_runtime_model_info() -> dict[str, Any]:
+    """Configured model settings plus live Ollama metadata when reachable."""
+    health = check_llm_health()
+    model_name = config.CHAT_MODEL
+    info: dict[str, Any] = {
+        "provider": config.LLM_PROVIDER,
+        "chat_model": config.CHAT_MODEL,
+        "report_model": config.REPORT_MODEL,
+        "ollama_base_url": config.OLLAMA_BASE_URL,
+        "chat_timeout_seconds": config.CHAT_TIMEOUT,
+        "chat_max_tokens": config.CHAT_MAX_TOKENS,
+        "ollama_ok": health.get("ok", False),
+        "models_available": health.get("models_available", []),
+        "model_modified_at": None,
+        "model_size_bytes": None,
+        "health_error": health.get("error"),
+        "health_hints": health.get("hints", []),
+    }
+
+    if not health.get("ok"):
+        return info
+
+    try:
+        response = requests.get(
+            f"{config.OLLAMA_BASE_URL}/api/tags",
+            proxies=config.NO_PROXY,
+            timeout=(config.CHAT_CONNECT_TIMEOUT, 10),
+        )
+        response.raise_for_status()
+        for entry in response.json().get("models", []):
+            name = entry.get("name", "")
+            if name == model_name or name.startswith(f"{model_name}:"):
+                info["model_modified_at"] = entry.get("modified_at")
+                info["model_size_bytes"] = entry.get("size")
+                info["resolved_model_name"] = name
+                break
+    except requests.exceptions.RequestException as e:
+        info["health_error"] = str(e)
+
+    return info
+
+
 def check_llm_health(timeout: int = 5) -> dict[str, Any]:
     health: dict[str, Any] = {
         "ok": False,

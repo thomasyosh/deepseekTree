@@ -158,6 +158,93 @@ def build_export_need_questions_html() -> str:
     )
 
 
+def build_system_meta_html(info: dict[str, Any], question: str) -> str:
+    """Answer questions about the analyst / LLM configuration (not case data)."""
+    lower = question.lower()
+    wants_update = any(
+        phrase in lower
+        for phrase in ("last updated", "last modified", "modified", "updated", "when was")
+    )
+    wants_running = any(
+        phrase in lower for phrase in ("running", "currently", "configured", "which model", "what model")
+    )
+
+    model = html.escape(str(info.get("chat_model", "—")))
+    provider = html.escape(str(info.get("provider", "—")))
+    base_url = html.escape(str(info.get("ollama_base_url", "—")))
+    resolved = info.get("resolved_model_name")
+    resolved_html = (
+        f'<li><strong>Ollama model tag:</strong> {html.escape(resolved)}</li>'
+        if resolved and resolved != info.get("chat_model")
+        else ""
+    )
+
+    status = "Connected" if info.get("ollama_ok") else "Not reachable"
+    status_detail = ""
+    if info.get("health_error"):
+        status_detail = f"<p><em>{html.escape(str(info['health_error']))}</em></p>"
+
+    modified = info.get("model_modified_at")
+    modified_line = ""
+    if modified:
+        modified_line = (
+            f"<li><strong>Model last modified (Ollama):</strong> "
+            f"{html.escape(str(modified))}</li>"
+        )
+    elif wants_update:
+        modified_line = (
+            "<li><strong>Model last modified:</strong> "
+            "Unavailable — Ollama did not return metadata for this model.</li>"
+        )
+
+    size = info.get("model_size_bytes")
+    size_line = ""
+    if size:
+        size_gb = int(size) / (1024**3)
+        size_line = f"<li><strong>Model size on disk:</strong> {size_gb:.2f} GB</li>"
+
+    available = info.get("models_available") or []
+    available_line = ""
+    if available:
+        items = "".join(f"<li><code>{html.escape(name)}</code></li>" for name in available[:8])
+        extra = f"<li><em>…and {len(available) - 8} more</em></li>" if len(available) > 8 else ""
+        available_line = f"<h3>Models installed in Ollama</h3><ol>{items}{extra}</ol>"
+
+    title = "AI model information"
+    if wants_update and not wants_running:
+        title = "Model update / version information"
+    elif wants_running:
+        title = "Model currently in use"
+
+    intro = (
+        "<p>This assistant uses a local LLM for open-ended questions. "
+        "Structured tree-complaint queries (counts, dates, districts) are answered "
+        "from the dataset without AI when possible.</p>"
+    )
+
+    return (
+        f'<section class="query-result"><h3>{title}</h3>'
+        f"{intro}"
+        f"<ul>"
+        f"<li><strong>Provider:</strong> {provider}</li>"
+        f"<li><strong>Chat model (.env):</strong> <code>{model}</code></li>"
+        f"<li><strong>Report model (.env):</strong> "
+        f"<code>{html.escape(str(info.get('report_model', '—')))}</code></li>"
+        f"{resolved_html}"
+        f"<li><strong>Ollama URL:</strong> <code>{base_url}</code></li>"
+        f"<li><strong>Status:</strong> {status}</li>"
+        f"{modified_line}"
+        f"{size_line}"
+        f"<li><strong>Chat timeout:</strong> {info.get('chat_timeout_seconds', '—')}s</li>"
+        f"</ul>"
+        f"{status_detail}"
+        f"{available_line}"
+        f"<p>To change the model, set <code>CHAT_MODEL</code> or <code>AI_MODEL</code> "
+        f"in <code>.env</code> and restart the server.</p>"
+        f"</section>"
+    )
+
+
 def build_chat_user_prompt(
     user_message: str,
     intent: str,

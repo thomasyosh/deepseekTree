@@ -5,10 +5,13 @@ from datetime import date
 from enum import Enum
 from typing import Any
 
+import llm_client
+
 from chat_normalize import (
     fuzzy_match_district,
     is_probably_in_scope,
     is_probably_off_topic,
+    is_system_meta_question,
     is_too_vague,
     normalize_user_message,
 )
@@ -16,6 +19,7 @@ from prompts import (
     build_chat_user_prompt,
     build_chat_welcome_html,
     build_scope_redirect_html,
+    build_system_meta_html,
 )
 from summary import build_summary
 
@@ -148,6 +152,8 @@ def _wants_earliest_date(message: str) -> bool:
 
 def _is_date_extreme_question(message: str) -> bool:
     """Single earliest/latest case_date questions — not multi-case sort lists."""
+    if is_system_meta_question(message):
+        return False
     lower = message.lower()
     if re.search(r"(?:top|前)\s*\d+", message, re.IGNORECASE):
         return False
@@ -295,10 +301,32 @@ def _extract_district(message: str, rows: list[dict[str, Any]]) -> str | None:
     return fuzzy_match_district(message, districts)
 
 
+def try_system_meta_reply(message: str) -> str | None:
+    """Answer questions about the LLM / app setup without calling the model."""
+    if not is_system_meta_question(message):
+        return None
+    try:
+        info = llm_client.get_runtime_model_info()
+    except Exception as e:
+        info = {
+            "provider": "ollama",
+            "chat_model": "unknown",
+            "report_model": "unknown",
+            "ollama_base_url": "",
+            "ollama_ok": False,
+            "health_error": str(e),
+            "models_available": [],
+        }
+    return build_system_meta_html(info, message)
+
+
 def try_preflight_reply(message: str) -> str | None:
     """Fast guidance for greetings, vague prompts, or clearly off-topic questions."""
     if is_too_vague(message):
         return build_chat_welcome_html()
+    meta = try_system_meta_reply(message)
+    if meta:
+        return meta
     if is_probably_off_topic(message) and not is_probably_in_scope(message):
         return build_scope_redirect_html()
     return None

@@ -171,3 +171,35 @@ def is_export_request(message: str) -> bool:
     if not cleaned or len(cleaned) > 100:
         return False
     return any(phrase in cleaned for phrase in _EXPORT_PHRASES)
+
+
+_META_MODEL_RE = re.compile(
+    r"\b("
+    r"ollama|deepseek|llm|"
+    r"what\s+model|which\s+model|model\s+name|model\s+running|model\s+used|"
+    r"model\s+configured|currently\s+running|"
+    r"model\s+last\s+(updated|modified)|last\s+updated|"
+    r"when\s+was\s+.*\bmodel\b|date\s+of\s+the\s+model|"
+    r"what\s+ai|which\s+ai|ai\s+model|"
+    r"who\s+(built|made)\s+(this|the)\s+(bot|chatbot|assistant|analyst)"
+    r")\b",
+    re.I,
+)
+
+_DATA_CONTEXT_RE = re.compile(
+    r"\b(case|cases|tree|trees|complaint|district|case_date|case_no|個案|樹|投訴|投诉)\b",
+    re.I,
+)
+
+
+def is_system_meta_question(message: str) -> bool:
+    """Questions about this chatbot / LLM setup — not tree-complaint data."""
+    cleaned = normalize_user_message(message)
+    if not cleaned:
+        return False
+    if not _META_MODEL_RE.search(cleaned):
+        return False
+    # e.g. "model" in a data-science sense with case/tree context — keep in data path.
+    if _DATA_CONTEXT_RE.search(cleaned):
+        return False
+    return True
