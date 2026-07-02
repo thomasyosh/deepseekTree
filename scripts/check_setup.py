@@ -12,7 +12,7 @@ import os  # noqa: E402
 import config  # noqa: E402
 import deepseek  # noqa: E402
 import llm_client  # noqa: E402
-import main as pipeline  # noqa: E402
+import app2 as pipeline  # noqa: E402
 
 
 def main() -> int:

@@ -19,7 +19,7 @@
             "module": "uvicorn",
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
-            "args": ["app:app", "--app-dir", "src", "--host", "0.0.0.0", "--port", "8000"],
+            "args": ["app2:app", "--app-dir", "src", "--host", "0.0.0.0", "--port", "8000"],
             "env": {
                 "PYTHONPATH": "${workspaceFolder}/src"
             }
@@ -31,7 +31,7 @@
             "module": "uvicorn",
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal",
-            "args": ["app:app", "--app-dir", "src", "--reload", "--host", "0.0.0.0", "--port", "8000"],
+            "args": ["app2:app", "--app-dir", "src", "--reload", "--host", "0.0.0.0", "--port", "8000"],
             "env": {
                 "PYTHONPATH": "${workspaceFolder}/src"
             }
